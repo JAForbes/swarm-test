@@ -105,10 +105,10 @@ resource "digitalocean_droplet" "worker" {
 #   ]
 # }
 
-# resource "digitalocean_container_registry" "registry" {
-#   name = "${terraform.workspace}-swarm-test-odin"
-#   subscription_tier_slug = "starter"
-# }
+resource "digitalocean_container_registry" "registry" {
+  name = "${terraform.workspace}-swarm-test-odin"
+  subscription_tier_slug = "starter"
+}
 
 # resource "digitalocean_project_resources" "resources" {
 #     project = digitalocean_project.project.id

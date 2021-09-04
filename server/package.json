@@ -1,0 +1,16 @@
+{
+    "name": "swarm-test",
+    "version": "0.0.0",
+    "description": "This is just me experimenting with docker-swarm to see how easy/difficult it would be to use swarm instead of heroku for all our servers / tasks.",
+    "main": "app.js",
+    "type": "module",
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "",
+    "license": "MIT",
+    "devDependencies": {
+      "zx": "^4.0.0"
+    }
+  }
+  

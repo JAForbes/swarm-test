@@ -3,3 +3,5 @@ node_modules
 .terraform.lock.hcl
 .terraform
 *.tfstate*
+.docker
+output
