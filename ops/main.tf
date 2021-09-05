@@ -4,23 +4,17 @@ terraform {
       source = "digitalocean/digitalocean"
       version = "~> 2.0"
     }
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "2.15.0"
+    }
   }
 }
-
-# Set the variable value in *.tfvars file
-# or using -var="do_token=..." CLI option
-variable "do_token" {}
+variable "DO_TOKEN" {}
 
 # Configure the DigitalOcean Provider
 provider "digitalocean" {
-  token = var.do_token
-}
-
-resource "digitalocean_project" "project" {
-  name        = "${terraform.workspace}-swarm-test-odin"
-  description = "Testing out Docker swarm"
-  purpose     = "Web Application"
-  environment = "development"
+  token = var.DO_TOKEN
 }
 
 resource "digitalocean_vpc" "vpc" {
@@ -48,7 +42,7 @@ locals {
 }
 
 resource "digitalocean_droplet" "manager" {
-  image = "docker-20-04"
+  image = "docker-18-04"
   name = "manager"
   region = "sgp1"
   size = "s-1vcpu-1gb"
@@ -57,21 +51,24 @@ resource "digitalocean_droplet" "manager" {
   monitoring = true
   tags = ["swarm", "manager"]
   private_networking = true
-  user_data = file("${path.module}/manager-init.sh")
-}
+  user_data = trimspace(
+    <<EOT
+    #!/bin/bash
 
-data "external" "join_command" {
-  depends_on = [
-    digitalocean_droplet.manager
-  ]
-  program = [ 
-    "/usr/bin/node", "./run.js", "get-join-token-command"
-  ]
-  working_dir = "../"
+    # local ip
+    lip=$(hostname -I | awk '{print $3}')
+
+    # init swarm
+    docker swarm init --advertise-addr $lip
+
+    # allow workers to join
+    ufw allow 2377
+    EOT
+  )
 }
 
 resource "digitalocean_droplet" "worker" {
-  image = "docker-20-04"
+  image = "docker-18-04"
   name = "worker-${count.index}"
   region = "sgp1"
   size = "s-1vcpu-1gb"
@@ -81,7 +78,6 @@ resource "digitalocean_droplet" "worker" {
   tags = ["swarm", "worker", "worker-${count.index}"]
   private_networking = true
   count = local.worker_count
-  user_data = data.external.join_command.result.command
 }
 
 # resource "digitalocean_loadbalancer" "lb" {
@@ -106,14 +102,82 @@ resource "digitalocean_droplet" "worker" {
 # }
 
 resource "digitalocean_container_registry" "registry" {
-  name = "${terraform.workspace}-swarm-test-odin"
+  name = "${terraform.workspace}-swarm-test"
   subscription_tier_slug = "starter"
 }
 
-# resource "digitalocean_project_resources" "resources" {
-#     project = digitalocean_project.project.id
-#     resources = concat(
-#       [digitalocean_droplet.manager.urn],
-#       digitalocean_droplet.worker[*].urn
-#     )
+resource "digitalocean_container_registry_docker_credentials" "registry" {
+  registry_name = digitalocean_container_registry.registry.name
+}
+
+# provider "docker" {
+#   host = "ssh://root@${digitalocean_droplet.manager.ipv4_address}"
+
+#   registry_auth {
+#     address             = digitalocean_container_registry.registry.server_url
+#     config_file_content = digitalocean_container_registry_docker_credentials.registry.docker_credentials
+#   }
 # }
+
+# resource "docker_image" "api" {
+#   name = "api"
+#   build {
+#     path = "./server"
+#     # image = "${digitalocean_container_registry.registry.server_url}/api"
+#   }
+# }
+
+# resource "docker_service" "api" {
+#   name = "api"
+
+#   task_spec {
+#     container_spec {
+#       image = docker_image.api.repo_digest
+#     }
+#   }
+
+#   endpoint_spec {
+#     ports {
+#       target_port = "8080"
+#     }
+#   }
+
+#   mode {
+#     replicated {
+#       replicas = 2
+#     }
+#   }
+# }
+
+resource "digitalocean_project" "project" {
+  name        = "${terraform.workspace}-swarm-test-odin"
+  description = "Testing out Docker swarm"
+  purpose     = "Web Application"
+  environment = "development"
+}
+
+resource "digitalocean_project_resources" "resources" {
+    project = digitalocean_project.project.id
+    resources = concat(
+      [digitalocean_droplet.manager.urn],
+      digitalocean_droplet.worker[*].urn
+    )
+}
+
+output registry_url {
+  value = digitalocean_container_registry.registry.endpoint
+}
+
+output registry_auth {
+  value = digitalocean_container_registry_docker_credentials.registry.docker_credentials
+  sensitive = true
+}
+
+output manager_ip {
+  value = digitalocean_droplet.manager.ipv4_address
+}
+
+output "worker_ips" {
+  value = digitalocean_droplet.worker[*].ipv4_address
+}
+

@@ -1,3 +1,100 @@
+It works.  Fully automated now.  I wrapped terraform as `terraform.sh` and added in my lifecycle scripts.
+
+It builds, it pushes, it replicates.
+
+---
+
+Now `docker login` hangs, scratch that `docker` hangs generally.
+
+---
+
+This seems to work:
+
+
+`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
+
+That means I need the DO_TOKEN available to my oncreate script.  It's currently in tfvars.
+
+Maybe I shouldn't use tfvars, it just creates duplication.
+
+I might bring back an .env file and have a terraform.sh script that just sets the directory and sources the env before usage.
+
+in CI .env won't exist but that's fine I'll just do `source .env || true` or something
+
+---
+
+Getting quite far now, but can't seem to auth into the registry by setting DOCKER_CONFIG to the correct path
+
+---
+
+On 18-04 which is meant to fix this issue (it didn't) the docker-compose version is
+
+docker-compose version 1.27.4, build 40524192
+
+and on my machine the docker-compose version is 
+
+docker-compose version 1.29.2, build 5becea4c
+
+
+I guess I'll try and install the same docker version on my local.
+
+`sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose`
+
+---
+
+My new problem is this:
+
+> stderr=OpenSSL version mismatch. Built against 1010106f, you have 101000cf
+
+There's an open issue for it https://github.com/docker/compose/issues/7686
+
+All kinds of fun things happening.  Apparently if I downgrade docker compose the error will go away.  When I ssh into the manager and run `docker-compose --version` it just hangs.
+
+---
+
+Two things that tripped me up this morning.  SSH rate limiting and a bug in docker cli where a DOCKER_CONTEXT for an invalid server will just hang any `docker context` commands.
+
+---
+
+My automation journey was basically a circular spiral of death.
+
+First I tried to script everything in terraform.  It worked but its janky because you can't see the output of logs for custom data providers and so its hard to debug.
+
+Then I thought to script everything in one pass afterwards.  But got distracted when it came to extract the auth necessesary to contact the registry.
+
+I wondered if I could get the auth from terraform, you can!  And the example shows usage with a docker terraform resource.  Which took me down the rabbit hole of using terraform instead of manually scripting.
+
+But ultimately I found the docker provider super confusing because it maps to the docker API not the docker-compose format.  It was hard to get basic things working like defining an `image` property on the service to auto push to the private registry on build and deploy.  It kept saying the property was unexpected.
+
+So now I'm thinking, I'll use this container registry thing, but only to store the auth as an output and then go back to manual scripting after the infra is up.
+---
+
+Ok before I proceed I am going to try to automate what I had to do so far.
+
+---
+
+I was wondering why the node.js docker image is 500mb, seems crazy.  The reason seems to be it includes an entire Debian distribution, and so several medium articles say to use alpine.  But I was reading from a docker captain that picking debian makes more sense because you won't trip on messing necessary common dependencies.
+
+The digital ocean registry pricing is $5 a month for 5gig which is probably fair, but here is a docker article on using S3 backed storage:
+
+https://docs.docker.com/registry/storage-drivers/s3/
+
+and another
+
+https://ops.tips/gists/aws-s3-private-docker-registry/
+
+It would be nice to not care too much registry cost or image size.  That's not something I want to have to think about.  And if the paid registry has no special sauce, why not just use S3.
+
+If DO automatically cleaned old images, maybe that'd be worth it.  But I don't think it does.
+
+---
+
+I need to parameterize the registry reference in the docker file with an env var from the terraform config.
+
+Or parameterize both with a top level env var.
+
+---
+
 I'm still not 100% across using the CLI to check if the app is healthy.  And I didn't actually ping any of the services to see if they working.  But deployment at least is working.
 
 ---
