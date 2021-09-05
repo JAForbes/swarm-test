@@ -1,2 +1,4 @@
+- Remote registry + compose build/push automated
+- New deployment workflow, lifecycle hooks
 - Worker join on provision working
 - Setup basic project

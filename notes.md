@@ -1,3 +1,13 @@
+I tried something basic and it didn't seem to work, so I'm reading this again:
+
+https://docs.docker.com/network/network-tutorial-overlay/
+
+---
+
+Now that it deploys.  I'll see if I can actually ping the running service from one of the nodes.
+
+---
+
 It works.  Fully automated now.  I wrapped terraform as `terraform.sh` and added in my lifecycle scripts.
 
 It builds, it pushes, it replicates.
