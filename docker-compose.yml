@@ -1,9 +1,15 @@
 version: "3.3"
 services:
-  api:
-    build: ./server
-    image: registry.digitalocean.com/default-swarm-test/api
+  # api:
+  #   build: ./server
+  #   image: registry.digitalocean.com/default-swarm-test/api
+  #   ports: 
+  #     - '8080:8080'
+  #   deploy:
+  #     replicas: 2
+  nginx:
+    image: nginx:latest
     ports: 
-      - '8080:8080'
+      - '80:80'
     deploy:
       replicas: 2

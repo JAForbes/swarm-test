@@ -1,3 +1,49 @@
+Running ngninx with `docker service create` works great.  So I think, I will avoid docker-compose files, docker stack etc.
+
+For now I'll try manually deploying a local build via `docker service create`
+
+If that works I'll look into the docker ssh socket thing and then automate everything again.
+
+I this works, I may return to using the docker terraform provider as my main gripe was the incompatibility with the docker compose format.  But the docker compose format doesn't even work so maybe it will work well 100% in terraform.
+
+---
+
+My new favourite thing is, private docker registries don't automatically fallback to the public docker registry.  So in order to have a mix of private and public images you need to first pull down the public images then push them to your registry...
+
+I can't believe that.
+
+---
+
+Trying docker service create, and I just can't believe how flaky using ssh for DOCKER_HOST is.
+
+So I thought, what if I port forward the docker socket and keep a persistent connection for the entire deploy.
+
+And... someone else thought of this which is great!
+
+https://medium.com/@dperny/forwarding-the-docker-socket-over-ssh-e6567cfab160
+
+---
+
+I keep getting an issue where I can ssh into the server fine, but docker-compose can't.  I'm very over this.  Going to try nomad next.
+
+Actually I may just try `docker service create` which will probably work fine.  Trust me for listening to devrel "I always prefer a stack!".
+
+---
+
+I deployed an nginx service, and docker stack doesn't seem to like my network.  But I just remembered, reading, somewhere... that nginx image exposes on port 80 so I have to bind to 80 or it won't work.  That wouldn't explain why my node code wasn't working, but lets at least try nginx with port 80 bound.
+
+Also I'm getting a new issue where terraform ends, known hosts works, cloud init waits and completes but then docker stack deploy doesn't connect straight away.  I think its connect limits/timeouts/rate limiting again.  But it seems worth it to tell SSH to temporarily not do that.  Another rabbit hole....
+
+---
+
+After seeing example after example using nginx, I thought I may as well use it to test my networking issues to rule out my build.
+
+Also, another thought.  Having scripts in terraform is nice because you can always run apply or destroy and the script won't necessarily run.  So I think what I'll do instead is have a null resource that references nothing and put the provisioners on that.
+
+It's not perfect but it at least will not run the script if an apply is a no-op.  It will capture oncreate/ondestroy for the entire config.
+
+---
+
 Other than whining, I should say, I managed to mess around with overlay, host, bridge networks a bit and I could ping a running nginx container from the public internet no problem.
 
 I think by default the swarm network is meant to be reachable by the host, but again, maybe its some version thing.

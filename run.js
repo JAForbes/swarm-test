@@ -20,14 +20,15 @@ async function oncreate(){
 	let x
 	x= await $`terraform -chdir=ops output -json`
 	x= JSON.parse(x.stdout)
+	await $`touch ~/.ssh/known_hosts`
 	await $`ssh-keygen -R ${x.manager_ip.value}`
 	await retry({ count: 5, delay: 30000 }
 		, () => $`ssh-keyscan -H ${x.manager_ip.value} >> ~/.ssh/known_hosts`
 	)
 	await ssh(x.manager_ip.value, `cloud-init status --wait`)
-	// await $`docker context use default`
-	// await $`docker context rm remote`.catch( () => {})
-	// await $`docker context create remote --docker 'host=ssh://root@${x.manager_ip.value}'`
+	await $`docker context use default`
+	await $`docker context rm remote`.catch( () => {})
+	await $`docker context create remote --docker 'host=ssh://root@${x.manager_ip.value}'`
 	
 	let restore = x; {
 		let cmd = await getJoinTokenCommand()
@@ -49,11 +50,19 @@ async function oncreate(){
 	await $`echo "export REGISTRY=${x.registry_url.value}" >> ./output/exports.sh`
 
 	await $`rm -fr  ~/.docker`
-	$.prefix = `source ./output/exports.sh;`
-	await $`docker-compose build`
-	await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
-	await $`docker-compose push`
-	await $`docker stack deploy --compose-file docker-compose.yml swarm-test --with-registry-auth`
+	// $.prefix = `source ./output/exports.sh;`
+	// // await retry( { count: 5, delay: 5000 }, async () => {
+	// 	await $`docker-compose build`
+	// // })
+	// // await retry( { count: 5, delay: 5000 }, async () => {
+	// 	await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
+	// // })
+	// // await retry( { count: 5, delay: 5000 }, async () => {
+	// 	await $`docker-compose push`
+	// // })
+	// // await retry({ count: 5, delay: 5000 }, async () => {
+	// 	await $`docker stack deploy --compose-file docker-compose.yml swarm-test --with-registry-auth`
+	// // })
 
 }
 
