@@ -1,3 +1,23 @@
+Other than whining, I should say, I managed to mess around with overlay, host, bridge networks a bit and I could ping a running nginx container from the public internet no problem.
+
+I think by default the swarm network is meant to be reachable by the host, but again, maybe its some version thing.
+
+Apparently there is a new docker-compose cli, `docker compose`.  it is a plugin for the main docker cli, and it is written in go.  Maybe there is more love there...
+
+I think I can specify host networking in the docker-compose yml, but I think that is also wrong.
+
+---
+
+I had to jump on a different machine because my ISP was being an ISP.  And immediately I hit new CLI issues.
+
+I think its pretty clear when using docker in production you need to pin your versions.  It's so easy to break a deploy script by being on the wrong point release.  Which is a sad state of affairs.  The amount of time I've wasted on silly bugs with open tickets.
+
+Also things like the snap repository not having permission to use remote docker hosts but instead of sayin that, there's just a cryptic error... it feels like a script you or I would write, not a tool used by thousands of companies.
+
+It is great tech, but the surface level stuff is flaky.
+
+---
+
 Its probably something really obvious, but I cannot curl the running service.  I haven't ruled out anything really yet though.
 
 A lot of the examples are using `docker service create`, whereas I've been using `docker stack deploy` and `docker-compose push` etc.

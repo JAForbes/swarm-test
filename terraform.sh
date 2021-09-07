@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source .env || true
+source .env.sh || true
 
 function init(){
     terraform -chdir=ops init $@
