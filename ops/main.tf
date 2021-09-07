@@ -38,6 +38,7 @@ resource "digitalocean_vpc" "vpc" {
 
 locals {
   garak = 31154024
+  bodhi = 31212382
   worker_count = 2
 }
 
@@ -47,7 +48,7 @@ resource "digitalocean_droplet" "manager" {
   region = "sgp1"
   size = "s-1vcpu-1gb"
   vpc_uuid = digitalocean_vpc.vpc.id
-  ssh_keys = [local.garak]
+  ssh_keys = [local.garak, local.bodhi]
   monitoring = true
   tags = ["swarm", "manager"]
   private_networking = true
@@ -74,7 +75,7 @@ resource "digitalocean_droplet" "worker" {
   region = "sgp1"
   size = "s-1vcpu-1gb"
   vpc_uuid = digitalocean_vpc.vpc.id
-  ssh_keys = [local.garak]
+  ssh_keys = [local.garak, local.bodhi]
   monitoring = true
   tags = ["swarm", "worker", "worker-${count.index}"]
   private_networking = true

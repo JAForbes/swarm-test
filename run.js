@@ -93,6 +93,7 @@ if(!subcommand || !(subcommand in commands)) {
 } else if( subcommand && commands[subcommand] ) {
 	commands[subcommand](argv, argv._)
 	.then( () => process.exit(0), async err => {
+		await $`mkdir -p ./output`
 		await fs.writeFile('./output/error.json', JSON.stringify({ message: err.message, stack: err.stack }))
 		throw err
 	} )

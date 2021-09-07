@@ -2,6 +2,9 @@
 
 source .env || true
 
+function init(){
+    terraform -chdir=ops init $@
+}
 function plan(){
     terraform -chdir=ops plan $@
 }
