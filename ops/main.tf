@@ -61,8 +61,9 @@ resource "digitalocean_droplet" "manager" {
     # init swarm
     docker swarm init --advertise-addr $lip
 
-    # allow workers to join
     ufw allow 2377
+    ufw allow 7946
+    ufw allow 4789
     EOT
   )
 }
@@ -78,6 +79,15 @@ resource "digitalocean_droplet" "worker" {
   tags = ["swarm", "worker", "worker-${count.index}"]
   private_networking = true
   count = local.worker_count
+   user_data = trimspace(
+    <<EOT
+    #!/bin/bash
+
+    ufw allow 2377
+    ufw allow 7946
+    ufw allow 4789
+    EOT
+  )
 }
 
 # resource "digitalocean_loadbalancer" "lb" {

@@ -3,5 +3,7 @@ services:
   api:
     build: ./server
     image: registry.digitalocean.com/default-swarm-test/api
+    ports: 
+      - '8080:8080'
     deploy:
       replicas: 2

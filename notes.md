@@ -1,3 +1,29 @@
+Its probably something really obvious, but I cannot curl the running service.  I haven't ruled out anything really yet though.
+
+A lot of the examples are using `docker service create`, whereas I've been using `docker stack deploy` and `docker-compose push` etc.
+
+Maybe `docker stack deploy` does something differently with networking.
+
+---
+
+I think once this works, I'll try out nomad to get a comparison.  I can see the value in swarm, and the simplicity.  But the CLI for docker is full of bugs.  And it rings alarms for me.
+
+I always had a good experience with terraform's CLI so it's worth giving it a go.
+
+I'm still very hesitant to use Kubernetes.  I don't want to introduce that level of complexity to Odin.  But I feel like I should
+do a few K8s examples so I can meaningfully compare before commiting to Nomad or Swarm.
+
+I just watched a stream where Bret Fisher was saying he was one of the last holdouts for swarm but he's not recommending it anymore.  This all seems to be based on non technical reasons, more industry reasons like everyone in industry moving towards K8s and docker selling off its closed source resources and team making people question if Swarm will continue to be developed.
+
+
+---
+
+Hanging on `docker logout` again so now I'm just doing:
+
+`rm ~/.docker` instead.
+
+---
+
 I tried something basic and it didn't seem to work, so I'm reading this again:
 
 https://docs.docker.com/network/network-tutorial-overlay/

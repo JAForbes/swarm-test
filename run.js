@@ -48,7 +48,7 @@ async function oncreate(){
 	await $`echo "export DOCKER_HOST='ssh://root@${x.manager_ip.value}'" >> ./output/exports.sh`
 	await $`echo "export REGISTRY=${x.registry_url.value}" >> ./output/exports.sh`
 
-	await $`docker logout ${x.registry_url.value}`
+	await $`rm -fr  ~/.docker`
 	$.prefix = `source ./output/exports.sh;`
 	await $`docker-compose build`
 	await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
