@@ -1,3 +1,20 @@
+Automation with tunnel working.  I'll look at moving some/all of this back into terraform now that it works.
+
+---
+
+This approached worked for me https://sysadmins.co.za/forwarding-the-docker-socket-via-a-ssh-tunnel-to-execute-docker-commands-locally/
+
+
+Having a local socket didn't, also arguably better because you don't need to remember to cleanup the local .sock file.
+
+Trying to automate using the port forwarding now.  But it isn't happy.  But I have faith!
+
+---
+
+Lol stack deploy works.  Ok I'll try the socket thing, that should remove most remaining problems I was hitting.  Then I'll go back to automating this instead of running commands manually.
+
+---
+
 Ok it works now.  I'll try stack deploy next
 
 ---

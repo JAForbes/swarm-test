@@ -1,11 +1,4 @@
-> Note, this was originally a private repo where I was going to _quickly_ (😂😢😭) test out docker swarm.  It has been such a hilariously poor experience.  I needed to make this public so I could share my frustration.  Check out [./notes.md](./notes.md) to see my very painful journey.
->
-> I'm not completely inexperienced with ops stuff.  I am definitely more of a developer than an operations person, but I've managed the deployments everywhere I've worked for many years.  Usually there's a little pain at the beginning when adopting a new tool or paradigm that pays off afterwards.  But this is just bug after bug after bug.
->
-> Even after all this I am hesitant to use k8s.  I'll try nomad after this.  But I am determined to get swarm working before giving up on it entirely.  Mostly because I want to believe!
->
-> Most of the issues I've run into, aren't really swarm, swarm is probably fine.  It's more the deployment to swarm via docker stack deploy/docker compose build.  But I won't know that til I get everything going.
-
+> Check out [./notes.md](./notes.md) to see my very painful journey.
 
 # Swarm Test
 

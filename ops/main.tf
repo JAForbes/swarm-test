@@ -65,6 +65,7 @@ resource "digitalocean_droplet" "manager" {
     ufw allow 2377
     ufw allow 7946
     ufw allow 4789
+    ufw allow 80
     EOT
   )
 }
@@ -87,6 +88,7 @@ resource "digitalocean_droplet" "worker" {
     ufw allow 2377
     ufw allow 7946
     ufw allow 4789
+    ufw allow 80
     EOT
   )
 }
