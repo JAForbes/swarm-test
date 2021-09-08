@@ -114,7 +114,7 @@ resource "digitalocean_droplet" "worker" {
 
 resource "digitalocean_container_registry" "registry" {
   name = "${terraform.workspace}-swarm-test"
-  subscription_tier_slug = "starter"
+  subscription_tier_slug = "basic"
 }
 
 resource "digitalocean_container_registry_docker_credentials" "registry" {

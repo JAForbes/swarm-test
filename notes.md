@@ -1,3 +1,19 @@
+Ok it works now.  I'll try stack deploy next
+
+---
+
+Oh my god, I just found a big mistake on my part.  The copy pasta node example I was using was listening _specifically_ on 127.0.0.1 which means it would ignore requests that didn't use that exact hostname.  Removing that worked locally.  I'll try that as a service, and then I'll retry stack deploy.
+
+I feel sheepish!
+
+---
+
+Now I'm running my built image on the swarm.  Curling it doesn't seem to work.  I just get connection refused.
+
+I might need to upgrade my registry so I can run 2 repositories and run my image and nginx side by side to see what the issue is.  But somehow nginx works and mine doesn't so that implies this is my fault as I deployed them in the same way.
+
+---
+
 Running ngninx with `docker service create` works great.  So I think, I will avoid docker-compose files, docker stack etc.
 
 For now I'll try manually deploying a local build via `docker service create`
