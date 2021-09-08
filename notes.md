@@ -1,3 +1,53 @@
+I just thought I could set `prevent_destroy` on the certificate resource.  But that isn't great either.  I'd need to never use destroy and instead comment out terraform files to cycle everything else.
+
+Maybe I create the certificate outside of this workflow and then simply import it into the config via a data source?
+
+---
+
+Hitting let's encrypt rate limits now so I can't keep testing the entire thing unless I stop using DO's certificate resource because I can't see a way to specify the LE endpoint to be staging.
+
+There is a let's encrypt provider.  So I may try that, or I may generate a certificate file and use that instead, but probably not as I don't want to think about expiring certificates.
+
+So that just incentivizes me further to use passthrough on the loadbalancer and handle the certificate/https inside the LB using nginx or something.  And then I can easily have wildcard subdomains.
+
+That said, for odin, I don't think we'll use wildcard subdomains, that's more a thing for other apps.  So that's not a big deal for me right now.
+
+I'm not sure how LE would work with multiple nodes each with their own nginx
+
+---
+
+I'm thinking about how I want this to work in reality now that is working quite well.
+
+So I was imagining inlining something similar to this repo in each project.  But the main cost benefit in having a swarm would be for every project to share the swarm.  That way if theres a lot of small projects with next to no traffic they can piggy back on larger commercial projects.  And equally larger commercial projects can justify having so many nodes because they are carrying load beyond just their app.
+
+So I cant believe I'm saying this, but I am thinking of having a distinct swarm repo that just managers the cluster.  And then each app simply thinks in docker stacks.  From those apps perspective the swarm is a static resource.  It has a static registry address, a static ssh domain etc.
+
+But... each app would need to share the same port space, and there could easily be collisions.  Which makes me think port registration should be replaced in favour of something like DNS look ups.
+
+Maybe each app has its own load balancer, but all apps share the same cluster?
+
+I know how to rig this up for a single app now.  From here its just building more complex images, linking the database to the VPC and that is all fairly rote.
+
+None of this accounts for static resources I guess, that is a question I hadn't considered.  Maybe I need to look at integrating spaces.
+
+There's also the question of wildcard subdomains, something not supported by DO directly.  Maybe I can have an nginx server on each node (`--global`) and that nginx server knows about all the apps, and all the certificates and routes via docker domain name to the correct service.  That's kind of great.  In that case, port mapping can be random.  We don't really care.
+
+Or, maybe there is an API in front of the cluster that accepts deployments.  And it does all this mess.
+
+Oh I also forgot about traefik!  I need to try that because that is probably the answer to a lot of these questions about routing to services and handling multiple apps.  Great
+
+---
+
+Working on adding in a loadbalancer and tightening up the firewall a bit before proceeding as it would be cool to see all this live against a domain.
+
+So I'm thinking I'll update the ufw rules to all target the swarm subnet.  I'll add a DO firewall that only allows 2222 / 443
+
+And then map 2222 to 22 or something.  Maybe I'll randomize it.  I actually don't need SSH access really once the infra is up as I'd rather just create a new workspace, deploy and use that.  I'm not sure why that isn't standard practice, maybe there is a reason?
+
+Maybe I'll reserve an IP that is allowed to SSH in, and then I'll use a floating IP and bind it to an ephemeral droplet whenever I need to SSH in I'll hop to the droplet via doctl, and into the given server and then teardown the ephemeral droplet on disconnect.
+
+---
+
 Automation with tunnel working.  I'll look at moving some/all of this back into terraform now that it works.
 
 ---

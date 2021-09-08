@@ -17,81 +17,99 @@ provider "digitalocean" {
   token = var.DO_TOKEN
 }
 
-resource "digitalocean_vpc" "vpc" {
-  name = "vpc"
-  region = "sgp1"
-  ip_range = "10.10.10.0/24"
+# resource "digitalocean_vpc" "vpc" {
+#   name = "vpc"
+#   region = "sgp1"
+#   ip_range = "10.10.10.0/24"
+# }
+
+# todo once DNS propagates and name servers
+# point to DO - run an apply once, then 
+# delete these resource blocks and uncomment
+# the data blocks below
+# effectively taking certificate management
+# out of terraforms hands
+resource "digitalocean_domain" "domain" {
+  name = "harth.systems"
 }
 
-# resource "digitalocean_domain" "domain" {
-#   name = "harth.app"
-# }
-# resource "digitalocean_certificate" "cert" {
+resource "digitalocean_certificate" "cert" {
+  name = "cert"
+  type = "lets_encrypt"
+  domains = [digitalocean_domain.domain.id]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# data "digitalocean_domain" "domain" {
 #   name = "cert"
-#   type = "lets_encrypt"
-#   domains = [digitalocean_domain.domain.id]
-
-#   lifecycle {
-#     create_before_destroy = true
-#   }
 # }
 
-locals {
-  garak = 31154024
-  bodhi = 31212382
-  worker_count = 2
-}
+# data "digitalocean_certificate" "cert" {
+#   name = "cert"
+# }
 
-resource "digitalocean_droplet" "manager" {
-  image = "docker-18-04"
-  name = "manager"
-  region = "sgp1"
-  size = "s-1vcpu-1gb"
-  vpc_uuid = digitalocean_vpc.vpc.id
-  ssh_keys = [local.garak, local.bodhi]
-  monitoring = true
-  tags = ["swarm", "manager"]
-  private_networking = true
-  user_data = trimspace(
-    <<EOT
-    #!/bin/bash
+# locals {
+#   garak = 31154024
+#   bodhi = 31212382
+#   worker_count = 2
+# }
 
-    # local ip
-    lip=$(hostname -I | awk '{print $3}')
+# resource "digitalocean_droplet" "manager" {
+#   image = "docker-18-04"
+#   name = "manager"
+#   region = "sgp1"
+#   size = "s-1vcpu-1gb"
+#   vpc_uuid = digitalocean_vpc.vpc.id
+#   ssh_keys = [local.garak, local.bodhi]
+#   monitoring = true
+#   tags = ["swarm", "manager"]
+#   private_networking = true
+#   user_data = trimspace(
+#     <<EOT
+#     #!/bin/bash
 
-    # init swarm
-    docker swarm init --advertise-addr $lip
+#     # local ip
+#     lip=$(hostname -I | awk '{print $3}')
 
-    ufw allow 2377
-    ufw allow 7946
-    ufw allow 4789
-    ufw allow 80
-    EOT
-  )
-}
+#     # init swarm
+#     docker swarm init --advertise-addr $lip
 
-resource "digitalocean_droplet" "worker" {
-  image = "docker-18-04"
-  name = "worker-${count.index}"
-  region = "sgp1"
-  size = "s-1vcpu-1gb"
-  vpc_uuid = digitalocean_vpc.vpc.id
-  ssh_keys = [local.garak, local.bodhi]
-  monitoring = true
-  tags = ["swarm", "worker", "worker-${count.index}"]
-  private_networking = true
-  count = local.worker_count
-   user_data = trimspace(
-    <<EOT
-    #!/bin/bash
+#     ufw allow from 10.10.10.0/24 to any port 2377
+#     ufw allow from 10.10.10.0/24 to any port 7946
+#     ufw allow from 10.10.10.0/24 to any port 4789
+#     ufw allow 80
+#     ufw allow 443
+#     EOT
+#   )
+# }
 
-    ufw allow 2377
-    ufw allow 7946
-    ufw allow 4789
-    ufw allow 80
-    EOT
-  )
-}
+# resource "digitalocean_droplet" "worker" {
+#   image = "docker-18-04"
+#   name = "worker-${count.index}"
+#   region = "sgp1"
+#   size = "s-1vcpu-1gb"
+#   vpc_uuid = digitalocean_vpc.vpc.id
+#   ssh_keys = [local.garak, local.bodhi]
+#   monitoring = true
+#   tags = ["swarm", "worker", "worker-${count.index}"]
+#   private_networking = true
+#   count = local.worker_count
+#    user_data = trimspace(
+#     <<EOT
+#     #!/bin/bash
+
+#     ufw allow from 10.10.10.0/24 to any port 2377
+#     ufw allow from 10.10.10.0/24 to any port 7946
+#     ufw allow from 10.10.10.0/24 to any port 4789
+
+#     ufw allow 80
+#     ufw allow 443
+#     EOT
+#   )
+# }
 
 # resource "digitalocean_loadbalancer" "lb" {
 #   name   = "lb"
@@ -100,97 +118,96 @@ resource "digitalocean_droplet" "worker" {
 #   vpc_uuid = digitalocean_vpc.vpc.id
 
 #   forwarding_rule {
-#     entry_port     = 22
-#     entry_protocol = "tcp"
+#     entry_port     = 443
+#     entry_protocol = "https"
 
-#     target_port     = 22
-#     target_protocol = "tcp"
+#     target_port     = 80
+#     target_protocol = "http"
 
 #     certificate_name = digitalocean_certificate.cert.name
 #   }
 
-#   droplet_ids = [
-#     digitalocean_droplet.manager.id
-#   ]
+#   droplet_tag = "swarm"
+  
 # }
 
-resource "digitalocean_container_registry" "registry" {
-  name = "${terraform.workspace}-swarm-test"
-  subscription_tier_slug = "basic"
-}
-
-resource "digitalocean_container_registry_docker_credentials" "registry" {
-  registry_name = digitalocean_container_registry.registry.name
-}
-
-# provider "docker" {
-#   host = "ssh://root@${digitalocean_droplet.manager.ipv4_address}"
-
-#   registry_auth {
-#     address             = digitalocean_container_registry.registry.server_url
-#     config_file_content = digitalocean_container_registry_docker_credentials.registry.docker_credentials
-#   }
+# resource "digitalocean_container_registry" "registry" {
+#   name = "${terraform.workspace}-swarm-test"
+#   subscription_tier_slug = "basic"
 # }
 
-# resource "docker_image" "api" {
-#   name = "api"
-#   build {
-#     path = "./server"
-#     # image = "${digitalocean_container_registry.registry.server_url}/api"
-#   }
+# resource "digitalocean_container_registry_docker_credentials" "registry" {
+#   registry_name = digitalocean_container_registry.registry.name
 # }
 
-# resource "docker_service" "api" {
-#   name = "api"
+# # provider "docker" {
+# #   host = "ssh://root@${digitalocean_droplet.manager.ipv4_address}"
 
-#   task_spec {
-#     container_spec {
-#       image = docker_image.api.repo_digest
-#     }
-#   }
+# #   registry_auth {
+# #     address             = digitalocean_container_registry.registry.server_url
+# #     config_file_content = digitalocean_container_registry_docker_credentials.registry.docker_credentials
+# #   }
+# # }
 
-#   endpoint_spec {
-#     ports {
-#       target_port = "8080"
-#     }
-#   }
+# # resource "docker_image" "api" {
+# #   name = "api"
+# #   build {
+# #     path = "./server"
+# #     # image = "${digitalocean_container_registry.registry.server_url}/api"
+# #   }
+# # }
 
-#   mode {
-#     replicated {
-#       replicas = 2
-#     }
-#   }
+# # resource "docker_service" "api" {
+# #   name = "api"
+
+# #   task_spec {
+# #     container_spec {
+# #       image = docker_image.api.repo_digest
+# #     }
+# #   }
+
+# #   endpoint_spec {
+# #     ports {
+# #       target_port = "8080"
+# #     }
+# #   }
+
+# #   mode {
+# #     replicated {
+# #       replicas = 2
+# #     }
+# #   }
+# # }
+
+# resource "digitalocean_project" "project" {
+#   name        = "${terraform.workspace}-swarm-test-odin"
+#   description = "Testing out Docker swarm"
+#   purpose     = "Web Application"
+#   environment = "development"
 # }
 
-resource "digitalocean_project" "project" {
-  name        = "${terraform.workspace}-swarm-test-odin"
-  description = "Testing out Docker swarm"
-  purpose     = "Web Application"
-  environment = "development"
-}
+# resource "digitalocean_project_resources" "resources" {
+#     project = digitalocean_project.project.id
+#     resources = concat(
+#       [digitalocean_droplet.manager.urn],
+#       digitalocean_droplet.worker[*].urn
+#     )
+# }
 
-resource "digitalocean_project_resources" "resources" {
-    project = digitalocean_project.project.id
-    resources = concat(
-      [digitalocean_droplet.manager.urn],
-      digitalocean_droplet.worker[*].urn
-    )
-}
+# output registry_url {
+#   value = digitalocean_container_registry.registry.endpoint
+# }
 
-output registry_url {
-  value = digitalocean_container_registry.registry.endpoint
-}
+# output registry_auth {
+#   value = digitalocean_container_registry_docker_credentials.registry.docker_credentials
+#   sensitive = true
+# }
 
-output registry_auth {
-  value = digitalocean_container_registry_docker_credentials.registry.docker_credentials
-  sensitive = true
-}
+# output manager_ip {
+#   value = digitalocean_droplet.manager.ipv4_address
+# }
 
-output manager_ip {
-  value = digitalocean_droplet.manager.ipv4_address
-}
-
-output "worker_ips" {
-  value = digitalocean_droplet.worker[*].ipv4_address
-}
+# output "worker_ips" {
+#   value = digitalocean_droplet.worker[*].ipv4_address
+# }
 

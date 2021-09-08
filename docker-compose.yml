@@ -7,9 +7,3 @@ services:
       - '80:8080'
     deploy:
       replicas: 6
-  nginx:
-    image: nginx:latest
-    ports: 
-      - '80:80'
-    deploy:
-      replicas: 2
