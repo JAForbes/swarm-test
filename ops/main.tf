@@ -31,6 +31,26 @@ locals {
   garak = 31154024
   bodhi = 31212382
   worker_count = 2
+
+  subnet = "10.10.10.0/24"
+
+  ssh_config = trimspace(
+    <<EOT
+      Port 22
+      #AddressFamily any
+      #ListenAddress 0.0.0.0
+      #ListenAddress ::
+
+      #LoginGraceTime 2m
+      PermitRootLogin yes
+      #StrictModes yes
+      #MaxAuthTries 6
+      #MaxSessions 10
+
+      PasswordAuthentication no
+      PrintMotd no
+    EOT
+  )
 }
 
 resource "digitalocean_droplet" "manager" {
@@ -43,9 +63,13 @@ resource "digitalocean_droplet" "manager" {
   monitoring = true
   tags = ["swarm", "manager"]
   private_networking = true
+
   user_data = trimspace(
     <<EOT
     #!/bin/bash
+    echo "
+      ${local.ssh_config}
+    " > /etc/sshd/config
 
     # local ip
     lip=$(hostname -I | awk '{print $3}')
@@ -53,11 +77,14 @@ resource "digitalocean_droplet" "manager" {
     # init swarm
     docker swarm init --advertise-addr $lip
 
-    ufw allow from 10.10.10.0/24 to any port 2377
-    ufw allow from 10.10.10.0/24 to any port 7946
-    ufw allow from 10.10.10.0/24 to any port 4789
+    ufw allow from ${local.subnet} to any port 2377
+    ufw allow from ${local.subnet} to any port 7946
+    ufw allow from ${local.subnet} to any port 4789
+
     ufw allow 80
     ufw allow 443
+
+    systemctl restart sshd
     EOT
   )
 }
@@ -103,8 +130,20 @@ resource "digitalocean_loadbalancer" "lb" {
     certificate_name = data.digitalocean_certificate.cert.name
   }
 
-  droplet_tag = "swarm"
-  
+  // shouldn't be necessary, but I get errors
+  // if I don't include it
+  // "422: some of the specified target droplets don't belong to the same VPC as the Load Balancer"
+  depends_on = [
+    digitalocean_droplet.manager,
+    digitalocean_droplet.worker,
+    digitalocean_vpc.vpc
+  ]
+
+  droplet_ids = concat(
+    [ digitalocean_droplet.manager.id ]
+    ,
+    digitalocean_droplet.worker[*].id
+  )  
 }
 
 resource "digitalocean_container_registry" "registry" {
@@ -126,9 +165,42 @@ resource "digitalocean_project" "project" {
 resource "digitalocean_project_resources" "resources" {
     project = digitalocean_project.project.id
     resources = concat(
-      [digitalocean_droplet.manager.urn],
+      [digitalocean_loadbalancer.lb.urn, digitalocean_droplet.manager.urn],
       digitalocean_droplet.worker[*].urn
     )
+}
+
+resource "digitalocean_firewall" "firewall" {
+  name = "only-22-80-and-443"
+
+  # depends_on = [
+  #   digitalocean_droplet.manager
+  #   , digitalocean_droplet.worker
+  # ]
+
+  droplet_ids = concat(
+    [ digitalocean_droplet.manager.id ]
+    ,
+    digitalocean_droplet.worker[*].id
+  )
+
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "22"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "443"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  outbound_rule {
+    protocol = "tcp"
+    port_range = "1-65535"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
 }
 
 output registry_url {

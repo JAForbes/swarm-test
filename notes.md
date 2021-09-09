@@ -1,3 +1,71 @@
+I'm going to commit the current garbage checks I'm doing to make `cloud-init status --wait` reliable before I find alternatives.  Apparently I can grab the errors in a structured json format.  Some errors are fine, they have nothing to do with my config, but instead things like digital ocean agent which is just used for metrics and stuff and can be repaired easily.
+
+I think its worth recording
+
+---
+
+Tried it, but immediately decided it is a terrible idea.  You have to encode shell scripts in yaml which is a minefield with escaping.
+
+Technically, I think, values on the cloud-config can be base64 encoded.  But just feels like a rabbit hole without much gain.  Running scripts is enough for me right now.
+
+I guess if you were building the yml in hcl, and then used their yml functions it might be fine.  But I can test that later in another context.
+
+---
+
+Trying cloud-config now instead of a simple script.  If this works I can control security a little more easily.  Like changing the SSH config to not use 22 but instead use a random port
+
+But also preinstalling packages before the `runcmd`
+
+---
+
+Firewall working.
+
+---
+
+Meanwhile I've been reading up on nomad.  It sounds cool.  The reliance on consul for service discovery is a little disappointing.  I really love that swarm has a load balancer built in so you can allocate ports to services and still have n replicas per node.
+
+I'm going to do a few experiments with nomad before deciding how I go.  But swarm is probably fine for the meanwhile.  It works well once you know how to avoid certain pitfalls.
+
+Having an ssh tunnel, not using `context`, nuking `~/.docker`, stuff like that solves a lot of problems.
+
+---
+
+😅 was banging my head against the wall why the deployment suddenly was failing on simple apt-gets.
+
+Turns out digital ocean's firewall defaults to no outbound traffic unless otherwise specified.  Which is great, but also suprising.
+
+Trying a deploy now with an outbound rule for all tcp traffic.
+
+---
+
+I'm getting 500s on my load balancer creation when I introduce a firewall.  No idea what is going on.
+
+I keep meaning to turn on TG_LOG=INFO but I don't want to cancel a run, and then when I start the run I do it automatically without thinking to change the command.
+
+---
+
+I also want to play with `depends_on` to see if I can get certain scripts to run at logical times.
+
+E.g. joining a swarm should happen after any worker is created but only if a manager is ready.
+
+I could put the depends_on on the worker but then the worker wouldn't get created in parallel.
+
+So I'm hoping I can trigger a provisioner on a null resource per worker.
+
+---
+
+So I did that.  The certificate is now just a data source.  Which seems so obvious in hindsight.
+
+Now I'm hitting issues with my firewall.  I put an ipv6 address in the allow list, and was locked out.  So I'm just going to allow all IPs for now.  For production I'll probably use a bastion.
+
+Next up I'll change the ssh ports.  Randomizing would be cool.  Does terraform have a random function?
+
+I love it: https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/integer
+
+Random pet names.... hmm...
+
+---
+
 I just thought I could set `prevent_destroy` on the certificate resource.  But that isn't great either.  I'd need to never use destroy and instead comment out terraform files to cycle everything else.
 
 Maybe I create the certificate outside of this workflow and then simply import it into the config via a data source?

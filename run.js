@@ -2,23 +2,33 @@
 
 import { $, argv, fs, sleep } from 'zx'
 
-let retry = async ({ count, delay=5000 }, f) => {
+let retry = async ({ count, delay=5000 }, f, evaluator=x=>x) => {
 	for(let i = 0; i < count; i++){
 		try {
 			return await f()
 		} catch (e) {
+			let done = await evaluator(e)
+			if( done ) return e
 			await new Promise( Y => setTimeout(Y, delay))
 		}
 	}
 }
-let ssh = (ip, command) => 
-	retry({ count: 10, delay: 30000 }, () =>
-		$`ssh root@${ip} -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
+let ssh = (ip, command, evaluator=x=>x) => 
+	retry(
+		{ count: 10, delay: 30000 }
+		, () =>
+			$`ssh root@${ip} -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
+		, evaluator
 	)
 
-let ignoreResolve = promise => new Promise(function(Y,N){
-	return promise.catch(N)
-})
+let DO_FAILURE=
+`
+status: error
+time: Thu, 09 Sep 2021 09:47:21 +0000
+detail:
+('scripts-vendor', RuntimeError('Runparts: 1 failures (install-do-agent) in 1 attempted commands',))
+`
+.trim()
 
 async function oncreate(){
 	try {
@@ -31,6 +41,16 @@ async function oncreate(){
 		await retry({ count: 5, delay: 30000 }
 			, () => $`ssh-keyscan -H ${x.manager_ip.value} >> ~/.ssh/known_hosts`
 		)
+
+
+
+		await ssh(x.manager_ip.value, `cloud-init status --long --wait`, x => {
+			if( (x+'').trim() == DO_FAILURE ) {
+				return undefined;
+			} else if ( (x+'').includes('RuntimeError') ) {
+				throw new Error(x)
+			}
+		})
 
 		await $`fuser -k 2377/tcp`.catch( () => {})
 
@@ -45,12 +65,18 @@ async function oncreate(){
 			, $`until netstat -an | grep 2377; do sleep 100; done;`
 		])
 		
-		await ssh(x.manager_ip.value, `cloud-init status --wait`)
-		
 		let restore = x; {
 			let cmd = await getJoinTokenCommand()
 			
-			x= x.worker_ips.value.map( x => ssh(x, cmd) )
+			x= x.worker_ips.value.map( 
+				x => ssh(x, cmd, x => {
+					if ( (x+'').includes('The attempt to join the swarm will continue in the background.') ) {
+						return true
+					} else if ( (x+'').includes('This node is already part of a swarm.') ) {
+						return true
+					}
+				}) 
+			)
 			x= await Promise.all(x)
 			x = restore;
 		}
@@ -97,7 +123,6 @@ async function getJoinTokenCommand(){
 	x = await $`doctl compute droplet list --tag-name swarm --tag-name manager --format PublicIPv4,PrivateIPv4 --no-header`
 	let [publicIP, privateIP] = x.stdout.trim().split(/\s+/)
 
-	await ssh(publicIP, "cloud-init status --wait")
 	x = await ssh(publicIP, "docker swarm join-token worker -q")
 	x = x.stdout.trim()
 	

@@ -13,8 +13,8 @@ function apply(){
     && ./run.js oncreate
 }
 function destroy(){
-    ./run.js onbeforeremove \
-    && terraform -chdir=ops destroy $@
+    ./run.js onbeforeremove
+    terraform -chdir=ops destroy $@
 }
 function dangerous-loop(){
     destroy -auto-approve && apply -auto-approve

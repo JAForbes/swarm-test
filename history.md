@@ -1,3 +1,8 @@
+- Early work hardening security, dynamic ssh config
+- Add an `evaluator` function to the retry util in run to early exit or ignore some failures
+- Firewall
+- Certificate + Load balancer
+- SSH Tunnel for more resilient remote DOCKER_HOST usage
 - Remote registry + compose build/push automated
 - New deployment workflow, lifecycle hooks
 - Worker join on provision working
