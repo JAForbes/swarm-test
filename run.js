@@ -23,86 +23,113 @@ let ssh = (ip, command, ...args) =>
 		, ...args
 	)
 
+async function verifyCloudInit(ip){
+	await ssh(ip, `cloud-init status --wait`, x => {
+		x= x+''
+		x = x.trim()
+		x= x.split('\n')
+		x= x.slice(-1)[0]
+
+		if( x == 'status: error' ) {
+			console.log('exiting early')
+			return true
+		}
+	})
+	{
+		let y
+		y= await ssh(ip, `cat /run/cloud-init/status.json`)
+		y= JSON.parse(y.stdout)	
+		
+		if( y.v1['modules-final'].errors.find( x => x.includes('scripts-user') )) {
+			throw new Error('Cloud init failed')
+		}
+	}
+}
+
+async function ensureConnection(ip){
+	await $`touch ~/.ssh/known_hosts`
+	await $`ssh-keygen -R ${ip}`
+	await retry({ count: 5, delay: 30000 }
+		, () => $`ssh-keyscan -H ${ip} >> ~/.ssh/known_hosts`
+	)
+}
+
+async function setupDockerHostTunnel(ip, { timeout=5*60*1000 }={}){
+	await $`fuser -k 2377/tcp`.catch( () => {})
+
+	// do not await, run in background
+	retry({ count: 5, delay: 20000 }, () => 
+		$`ssh -NL localhost:2377:/var/run/docker.sock root@${ip}`
+	)
+	
+	// check the tunnel is running
+	await Promise.race([
+		sleep(timeout).then( () => { throw Error('Netstat Timeout') })
+		, $`until netstat -an | grep 2377; do sleep 100; done;`
+	])
+}
+
+async function joinSwarm(ips){
+	let x = ips
+	let cmd = await getJoinTokenCommand()
+	
+	x= x.map( 
+		x => ssh(x, cmd, x => {
+			if ( (x+'').includes('The attempt to join the swarm will continue in the background.') ) {
+				return true
+			} else if ( (x+'').includes('This node is already part of a swarm.') ) {
+				return true
+			}
+		}) 
+	)
+	x= await Promise.all(x)
+}
+
+async function remoteDockerEnv(registryURL){
+	await $`mkdir -p ./ops/.docker`
+	await $`rm -fr ./ops/.docker/**`
+	await $`terraform -chdir=ops output -raw registry_auth > $(pwd)/ops/.docker/config.json`
+
+
+	await $`mkdir -p ./output`
+	await $`rm -fr ./output/**`
+	await $`echo "export DOCKER_CONFIG=$(pwd)/ops/.docker" >> ./output/exports.sh`
+	await $`echo "export DOCKER_HOST='localhost:2377'" >> ./output/exports.sh`
+	await $`echo "export REGISTRY=${registryURL}" >> ./output/exports.sh`
+	await $`rm -fr  ~/.docker`
+}
+
+async function useDocker(){
+	let prefix = `source ./output/exports.sh;`
+	await $([`${prefix}docker-compose build`])
+	await $([`${prefix}docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`])
+	await $([`${prefix}docker-compose push`])
+	await $([`${prefix}docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`])
+}
+
+async function killTunnel(){
+	await $`fuser -k 2377/tcp`.catch( () => {})
+}
+
 async function oncreate(){
 	try {
 		let x
 		x= await $`terraform -chdir=ops output -json`
 		x= JSON.parse(x.stdout)
 
-		await $`touch ~/.ssh/known_hosts`
-		await $`ssh-keygen -R ${x.manager_ip.value}`
-		await retry({ count: 5, delay: 30000 }
-			, () => $`ssh-keyscan -H ${x.manager_ip.value} >> ~/.ssh/known_hosts`
-		)
 
-		await ssh(x.manager_ip.value, `cloud-init status --wait`, x => {
-			if( (x+'').trim() == 'status:error' ) return true
-		})
-		{
-			let y
-			y= await ssh(x.manager_ip.value, `cat /run/cloud-init/status.json`)
-			console.log(y)
-			y= JSON.parse(y.stdout)
-			
-			if( y.errors.length ) {
-				for(let err of y.errors){
-					console.error('cloud init err', JSON.stringify(err, null, 2))
-				}
-				throw new Error('Cloud init failed')
-			}
-		}
-
-		await $`fuser -k 2377/tcp`.catch( () => {})
-
-		// do not await, run in background
-		retry({ count: 5, delay: 20000 }, () => 
-			$`ssh -NL localhost:2377:/var/run/docker.sock root@${x.manager_ip.value}`
-		)
+		await ensureConnection(x.manager_ip.value)
+		await verifyCloudInit(x.manager_ip.value)
+		await setupDockerHostTunnel(x.manager_ip.value)
+		await joinSwarm(x.worker_ips.value)
+		await remoteDockerEnv(x.registry_url.value)	
 		
-		// check the tunnel is running
-		await Promise.race([
-			sleep(5*60*1000).then( () => { throw Error('Netstat Timeout') })
-			, $`until netstat -an | grep 2377; do sleep 100; done;`
-		])
-		
-		let restore = x; {
-			let cmd = await getJoinTokenCommand()
-			
-			x= x.worker_ips.value.map( 
-				x => ssh(x, cmd, x => {
-					if ( (x+'').includes('The attempt to join the swarm will continue in the background.') ) {
-						return true
-					} else if ( (x+'').includes('This node is already part of a swarm.') ) {
-						return true
-					}
-				}) 
-			)
-			x= await Promise.all(x)
-			x = restore;
-		}
-	
-		await $`mkdir -p ./ops/.docker`
-		await $`rm -fr ./ops/.docker/**`
-		await $`terraform -chdir=ops output -raw registry_auth > $(pwd)/ops/.docker/config.json`
-	
-	
-		await $`mkdir -p ./output`
-		await $`rm -fr ./output/**`
-		await $`echo "export DOCKER_CONFIG=$(pwd)/ops/.docker" >> ./output/exports.sh`
-		await $`echo "export DOCKER_HOST='localhost:2377'" >> ./output/exports.sh`
-		await $`echo "export REGISTRY=${x.registry_url.value}" >> ./output/exports.sh`
-	
-		await $`rm -fr  ~/.docker`
-		$.prefix = `source ./output/exports.sh;`
-		await $`docker-compose build`
-		await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
-		await $`docker-compose push`
-		await $`docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`
+		await useDocker()
 	} catch (e) {
 		console.error(e)
 		throw e
 	} finally {
-		await $`fuser -k 2377/tcp`.catch( () => {})
+		await killTunnel()
 	}
 	
 
@@ -112,8 +139,6 @@ async function onbeforeremove(){
 	let x;
 	x= await $`terraform -chdir=ops output -json`
 	x= JSON.parse(x.stdout)
-	// await $`docker context use default`
-	// await $`docker context rm remote`.catch( () => {})
 	await $`ssh-keygen -R ${x.manager_ip.value}`
 }
 

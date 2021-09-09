@@ -1,3 +1,19 @@
+Refactoring a bit now.  Just putting stuff into functions first.  But it'd be great if all the setup teardown stuff was guaranteed to tear down.
+
+Maybe...
+
+```js
+await useDockerTunnel( x => {
+
+})
+```
+
+And it can use finally / exit listeners.  Maybe I'll try prexit again.
+
+Be cool if prefix could be function aware...
+
+---
+
 I'm going to commit the current garbage checks I'm doing to make `cloud-init status --wait` reliable before I find alternatives.  Apparently I can grab the errors in a structured json format.  Some errors are fine, they have nothing to do with my config, but instead things like digital ocean agent which is just used for metrics and stuff and can be repaired easily.
 
 I think its worth recording
