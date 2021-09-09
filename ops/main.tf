@@ -47,6 +47,7 @@ resource "digitalocean_droplet" "manager" {
   user_data = trimspace(
     <<EOT
     #!/bin/bash
+    set -e
 
     # local ip
     lip=$(hostname -I | awk '{print $3}')
@@ -60,9 +61,6 @@ resource "digitalocean_droplet" "manager" {
     
     ufw allow 80
     ufw allow 443
-
-    echo "intentional error"
-    exit 1
     EOT
   )
 }
@@ -81,6 +79,7 @@ resource "digitalocean_droplet" "worker" {
    user_data = trimspace(
     <<EOT
     #!/bin/bash
+    set -e
 
     ufw allow from 10.10.10.0/24 to any port 2377
     ufw allow from 10.10.10.0/24 to any port 7946

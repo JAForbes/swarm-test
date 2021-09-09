@@ -1,3 +1,8 @@
+Refactors work.  And custom SSH config working from cloud-init.  Trying hardcoded port 23 and if that works I'll randomize it with the terraform random data provider.
+
+---
+
+
 Refactoring a bit now.  Just putting stuff into functions first.  But it'd be great if all the setup teardown stuff was guaranteed to tear down.
 
 Maybe...

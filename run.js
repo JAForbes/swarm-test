@@ -14,12 +14,12 @@ let retry = async ({ count, delay=5000 }, f, evaluator=() => false) => {
 		}
 	}
 }
+
 let ssh = (ip, command, ...args) => 
 	retry(
 		{ count: 10, delay: 30000 }
 		, () =>
-			console.log('retry ssh',command) ||
-			$`ssh root@${ip} -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
+			$`ssh root@${ip} -p 22 -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
 		, ...args
 	)
 
@@ -59,7 +59,7 @@ async function setupDockerHostTunnel(ip, { timeout=5*60*1000 }={}){
 
 	// do not await, run in background
 	retry({ count: 5, delay: 20000 }, () => 
-		$`ssh -NL localhost:2377:/var/run/docker.sock root@${ip}`
+		$`ssh -p 22 -NL localhost:2377:/var/run/docker.sock root@${ip}`
 	)
 	
 	// check the tunnel is running
