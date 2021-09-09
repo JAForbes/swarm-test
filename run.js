@@ -2,9 +2,10 @@
 
 import { $, argv, fs, sleep } from 'zx'
 
-let retry = async ({ count, delay=5000 }, f, evaluator=x=>x) => {
+let retry = async ({ count, delay=5000 }, f, evaluator=() => false) => {
 	for(let i = 0; i < count; i++){
 		try {
+
 			return await f()
 		} catch (e) {
 			let done = await evaluator(e)
@@ -13,22 +14,14 @@ let retry = async ({ count, delay=5000 }, f, evaluator=x=>x) => {
 		}
 	}
 }
-let ssh = (ip, command, evaluator=x=>x) => 
+let ssh = (ip, command, ...args) => 
 	retry(
 		{ count: 10, delay: 30000 }
 		, () =>
+			console.log('retry ssh',command) ||
 			$`ssh root@${ip} -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
-		, evaluator
+		, ...args
 	)
-
-let DO_FAILURE=
-`
-status: error
-time: Thu, 09 Sep 2021 09:47:21 +0000
-detail:
-('scripts-vendor', RuntimeError('Runparts: 1 failures (install-do-agent) in 1 attempted commands',))
-`
-.trim()
 
 async function oncreate(){
 	try {
@@ -42,15 +35,22 @@ async function oncreate(){
 			, () => $`ssh-keyscan -H ${x.manager_ip.value} >> ~/.ssh/known_hosts`
 		)
 
-
-
-		await ssh(x.manager_ip.value, `cloud-init status --long --wait`, x => {
-			if( (x+'').trim() == DO_FAILURE ) {
-				return undefined;
-			} else if ( (x+'').includes('RuntimeError') ) {
-				throw new Error(x)
-			}
+		await ssh(x.manager_ip.value, `cloud-init status --wait`, x => {
+			if( (x+'').trim() == 'status:error' ) return true
 		})
+		{
+			let y
+			y= await ssh(x.manager_ip.value, `cat /run/cloud-init/status.json`)
+			console.log(y)
+			y= JSON.parse(y.stdout)
+			
+			if( y.errors.length ) {
+				for(let err of y.errors){
+					console.error('cloud init err', JSON.stringify(err, null, 2))
+				}
+				throw new Error('Cloud init failed')
+			}
+		}
 
 		await $`fuser -k 2377/tcp`.catch( () => {})
 
