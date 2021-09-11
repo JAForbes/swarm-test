@@ -1,3 +1,9 @@
+Now I'm trying to refactor run a bit to clean up after itself via `use` functions.  After that I'll look at:
+
+> So maybe I have an app resource in terraform, it hashes the app source, and if it changes it makes an image, pushes it to the registry.
+
+---
+
 I just configured the terraform but not the run script because I was thinking about this.  Randomizing every single port isn't any more secure than randomizing it once.
 
 Because the process is the same, you are just going to pick a single host, cycle through the ports until you get a hit.  If you get the port, you can continue trying to break in to that single host.  That host is part of a vpc with a subnet.  The nodes within that subnet can all talk to eachother.  So in effect, getting into one node is the same as getting into all nodes.  The assumptions is no-one gets into the VPC and that is a good assumption.  Not because it is impossible, but because if they get into the VPC its game over and efforted expended there is just a waste of time.

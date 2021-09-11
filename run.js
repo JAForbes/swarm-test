@@ -31,7 +31,6 @@ async function verifyCloudInit(ip){
 		x= x.slice(-1)[0]
 
 		if( x == 'status: error' ) {
-			console.log('exiting early')
 			return true
 		}
 	})
@@ -46,27 +45,18 @@ async function verifyCloudInit(ip){
 	}
 }
 
-async function ensureConnection(ip){
+async function useConnection({ ip }, f) {
 	await $`touch ~/.ssh/known_hosts`
 	await $`ssh-keygen -R ${ip}`
 	await retry({ count: 5, delay: 30000 }
 		, () => $`ssh-keyscan -p $SSH_PORT -H ${ip} >> ~/.ssh/known_hosts`
 	)
-}
 
-async function setupDockerHostTunnel(ip, { timeout=5*60*1000 }={}){
-	await $`fuser -k 2377/tcp`.catch( () => {})
-
-	// do not await, run in background
-	retry({ count: 5, delay: 20000 }, () => 
-		$`ssh -p $SSH_PORT -NL localhost:2377:/var/run/docker.sock root@${ip}`
-	)
-	
-	// check the tunnel is running
-	await Promise.race([
-		sleep(timeout).then( () => { throw Error('Netstat Timeout') })
-		, $`until netstat -an | grep 2377; do sleep 100; done;`
-	])
+	try {
+		return await f()
+	} finally {
+		await $`ssh-keygen -R ${ip}`
+	}
 }
 
 async function joinSwarm(ips){
@@ -85,50 +75,48 @@ async function joinSwarm(ips){
 	await Promise.all(x)
 }
 
-async function remoteDockerEnv(registryURL){
-	await $`mkdir -p ./ops/.docker`
-	await $`rm -fr ./ops/.docker/**`
+async function useTunnel({ timeout=5*60*1000, ip }, f){
+	try {
 
-	await $`mkdir -p ./output`
-	await $`rm -fr ./output/**`
-	await $`echo "export DOCKER_HOST='localhost:2377'" >> ./output/exports.sh`
-	await $`echo "export REGISTRY=${registryURL}" >> ./output/exports.sh`
-	await $`rm -fr  ~/.docker`
-}
+		await $`fuser -k 2377/tcp`.catch( () => {})
+	
+		// do not await, run in background
+		retry({ count: 5, delay: 20000 }, () => 
+			$`ssh -p $SSH_PORT -NL localhost:2377:/var/run/docker.sock root@${ip}`
+		)
+		
+		// check the tunnel is running
+		await Promise.race([
+			sleep(timeout).then( () => { throw Error('Netstat Timeout') })
+			, $`until netstat -an | grep 2377; do sleep 100; done;`
+		])
 
-async function useDocker(){
-	await $`docker-compose build`
-	await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
-	await $`docker-compose push`
-	await $`export DOCKER_HOST='localhost:2377'; docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`
-}
-
-async function killTunnel(){
-	await $`fuser -k 2377/tcp`.catch( () => {})
+		return await f()
+	} finally {
+		await $`fuser -k 2377/tcp`.catch( () => {})
+	}
 }
 
 async function oncreate(){
-	try {
-		let x
-		x= await $`terraform -chdir=ops output -json`
-		x= JSON.parse(x.stdout)
+	let x
+	x= await $`terraform -chdir=ops output -json`
+	x= JSON.parse(x.stdout)
 
-
-		await ensureConnection(x.manager_ip.value)
-		await verifyCloudInit(x.manager_ip.value)
-		await setupDockerHostTunnel(x.manager_ip.value)
-		await joinSwarm(x.worker_ips.value)
-		await remoteDockerEnv(x.registry_url.value)	
+	let ip = x.manager_ip.value
+	await useConnection({ ip }, async () => {
 		
-		await useDocker()
-	} catch (e) {
-		console.error(e)
-		throw e
-	} finally {
-		await killTunnel()
-	}
-	
+		await verifyCloudInit(ip)
 
+		await useTunnel({ ip }, async () => {
+			await joinSwarm(x.worker_ips.value)
+	
+			await $`rm -fr  ~/.docker`
+			await $`docker-compose build`
+			await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
+			await $`docker-compose push`
+			await $`export DOCKER_HOST='localhost:2377'; docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`
+		})
+	})
 }
 
 async function onbeforeremove(){
