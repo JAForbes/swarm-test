@@ -1,3 +1,87 @@
+End to end worked with 2222.  Just cleaning up a bit, I think I don't need `./output/exports.sh` anymore as the only variable needed is `DOCKER_HOST` and it is only used for the `stack` call.
+
+I was just thinking too, even if I have n managers.  The ideal way to deploy it is to have a single leader at infra time, and then add managers and workers to that leader's swarm.  So the logic is not too different.
+
+I'll simply treat `manager[0]` is the leader and `manager[n+1]` as joiners.  All my initial propagation commands can rely on that leader existing.  Subsequent deployments will fail if the `manager[0]` is down, but the existing app will continue to work as the other managers will handle the load.
+
+I'm just thinking out loud here. 
+
+Is the initial deployment and subsequent deployments necessarily different?
+
+If I run apply, and there's no infra change, my run script will run as if its the first time, which isn't good.  So I can have this script instead run as a provisioner in terraform to ensure that only runs oncreate.
+
+If I am simply deploying images though, I'll want that to happen everytime an app changes.
+
+So maybe I have an app resource in terraform, it hashes the app source, and if it changes it makes an image, pushes it to the registry.
+
+If there is a new app, there is a new resource, and that works fine.
+
+So the separation is joining/creating swarms and managing services/images.  If I separate them, I can do everything with `apply`.
+
+I think that's the next step.  I'll make an app resource.
+
+The other thing to check is, can I go back to managing images and the registry in terraform by using the official docker provider?  I'm not doing anything too special.  The only interesting thing is the ssh tunnel, but I assume the terraform provider would have retries internally anyway.  Who knows.  I could still manage the tunnel in terraform if not.
+
+---
+
+It was ufw, omg.  So obvious. 
+
+I'll now try an end to end with all infra ( e.g. + DO firewall, + VPC, + ufw ) on port 2222
+
+And then I'll use the randomly allocated port
+
+---
+
+I think it didn't work because I was using an already allocated port.  Maybe random ports aren't a good idea.  Or at least, being unsophisticated about it.
+
+---
+
+I'm thinking how I can optimize caching of application source.
+
+Maybe each repo pushes its own image to the private registry?  But I kind of like the idea of the app in question having no idea about any of that, and instead the infra repo pulls the repo down, and builds the image here.
+
+It is a trade off.  Ultimately an application repository has the best understanding of what its own requirements are.  But that kind of config changes so infrequently.
+
+It would be annoying to have to pull every repo every time with zero caching.  But git sub modules doesn't sound too attractive either.
+
+Maybe there is a mirror server, every time there is a git update on any of the target repos, the mirror server pulls down the code.  And all deployments happen on that persistent build server.
+
+The deploy repo simply ssh's in, and runs whatever commands we are doing here.
+
+Or... the deploy repo just commits changes from other apps and it is stored just like any other source control.  Then it can't be public, but it is so much simpler.
+
+Not sure.
+
+Might just do a shallow clone and hope for the best.  Or profile fetching tarballs.
+
+Back to ports!
+
+---
+
+I have no idea why, but generating the SSH config isn't working the moment I change the port from 22.  I might pair down the infra a bit and see if I can get basic thing going.  
+
+But just had a thought, it is probably super obvious but it never occurred to me.
+
+I could have a deployment repo.  This repo would basically compile images for all the apps.  And push the images up to the swarm, and manage ports and stuff like that centrally.
+
+When a merge request occurs in a given app, it could simply invoke a github action on the deploy repo.
+
+That way, only 1 repo needs all this config, and env, and if we hire developers we can contract out and not worry about developers with full repo access having access to infrastructure.
+
+I am a big fan of monorepos.  But for resource sharing on a cluster, the benefits superceded the benefits of a monorepo.
+
+So I may convert this repo into an an actual production thing.
+
+Even better, the infra repo could be open source without exposing secrets to the world.  E.g. random port allocation would stop an on looker from knowing what the port to SSH into the swarm is.  Making targeted attacks that much more annoying and easier to block.
+
+I was thinking before I'd use this as an experimental place and then copy the config into each product.  But having it all here makes it seem feasible to build out the real thing without too much pain.  I can use alternative domains, get production up for every app and then switch the real apps over when I am convinced it is stable.
+
+So that's my new target goal I think.
+
+But it also means I need to harden security further.
+
+---
+
 Refactors work.  And custom SSH config working from cloud-init.  Trying hardcoded port 23 and if that works I'll randomize it with the terraform random data provider.
 
 ---

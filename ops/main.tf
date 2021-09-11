@@ -31,6 +31,19 @@ locals {
   garak = 31154024
   bodhi = 31212382
   worker_count = 2
+  manager_count = 1
+}
+
+resource "random_integer" "manager_port" {
+  min = 1000
+  max = 65000
+  count = local.manager_count
+}
+
+resource "random_integer" "worker_port" {
+  min = 1000
+  max = 65000
+  count = local.worker_count
 }
 
 resource "digitalocean_droplet" "manager" {
@@ -48,6 +61,27 @@ resource "digitalocean_droplet" "manager" {
     <<EOT
     #!/bin/bash
     set -e
+
+		cat <<- SSHCONFIG > /etc/ssh/sshd_config
+			Port 2222
+			PermitRootLogin yes
+			#StrictModes yes
+			#MaxAuthTries 6
+			#MaxSessions 10
+			#PubkeyAuthentication yes
+
+			ChallengeResponseAuthentication no
+			UsePAM yes
+
+			X11Forwarding yes
+			PrintMotd no
+
+			# override default of no subsystems
+			Subsystem       sftp    /usr/lib/openssh/sftp-server			
+		SSHCONFIG
+
+    ufw allow 2222
+		systemctl restart sshd
 
     # local ip
     lip=$(hostname -I | awk '{print $3}')
@@ -80,6 +114,29 @@ resource "digitalocean_droplet" "worker" {
     <<EOT
     #!/bin/bash
     set -e
+
+    cat <<- SSHCONFIG > /etc/ssh/sshd_config
+			Port 2222
+			PermitRootLogin yes
+			#StrictModes yes
+			#MaxAuthTries 6
+			#MaxSessions 10
+			#PubkeyAuthentication yes
+
+			ChallengeResponseAuthentication no
+			UsePAM yes
+
+			X11Forwarding yes
+			PrintMotd no
+
+			# override default of no subsystems
+			Subsystem       sftp    /usr/lib/openssh/sftp-server			
+		SSHCONFIG
+
+    ufw allow 2222
+		systemctl restart sshd
+
+    echo port ${random_integer.worker_port[count.index].result}
 
     ufw allow from 10.10.10.0/24 to any port 2377
     ufw allow from 10.10.10.0/24 to any port 7946
@@ -169,6 +226,12 @@ resource "digitalocean_firewall" "firewall" {
 
   inbound_rule {
     protocol         = "tcp"
+    port_range       = "2222"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  inbound_rule {
+    protocol         = "tcp"
     port_range       = "443"
     source_addresses = ["0.0.0.0/0", "::/0"]
   }
@@ -197,3 +260,6 @@ output "worker_ips" {
   value = digitalocean_droplet.worker[*].ipv4_address
 }
 
+output "worker_ports" {
+  value = random_integer.worker_port[*].result
+}

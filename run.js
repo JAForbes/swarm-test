@@ -19,7 +19,7 @@ let ssh = (ip, command, ...args) =>
 	retry(
 		{ count: 10, delay: 30000 }
 		, () =>
-			$`ssh root@${ip} -p 22 -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
+			$`ssh root@${ip} -p 2222 -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
 		, ...args
 	)
 
@@ -50,7 +50,7 @@ async function ensureConnection(ip){
 	await $`touch ~/.ssh/known_hosts`
 	await $`ssh-keygen -R ${ip}`
 	await retry({ count: 5, delay: 30000 }
-		, () => $`ssh-keyscan -H ${ip} >> ~/.ssh/known_hosts`
+		, () => $`ssh-keyscan -p 2222 -H ${ip} >> ~/.ssh/known_hosts`
 	)
 }
 
@@ -59,7 +59,7 @@ async function setupDockerHostTunnel(ip, { timeout=5*60*1000 }={}){
 
 	// do not await, run in background
 	retry({ count: 5, delay: 20000 }, () => 
-		$`ssh -p 22 -NL localhost:2377:/var/run/docker.sock root@${ip}`
+		$`ssh -p 2222 -NL localhost:2377:/var/run/docker.sock root@${ip}`
 	)
 	
 	// check the tunnel is running
@@ -88,23 +88,19 @@ async function joinSwarm(ips){
 async function remoteDockerEnv(registryURL){
 	await $`mkdir -p ./ops/.docker`
 	await $`rm -fr ./ops/.docker/**`
-	await $`terraform -chdir=ops output -raw registry_auth > $(pwd)/ops/.docker/config.json`
-
 
 	await $`mkdir -p ./output`
 	await $`rm -fr ./output/**`
-	await $`echo "export DOCKER_CONFIG=$(pwd)/ops/.docker" >> ./output/exports.sh`
 	await $`echo "export DOCKER_HOST='localhost:2377'" >> ./output/exports.sh`
 	await $`echo "export REGISTRY=${registryURL}" >> ./output/exports.sh`
 	await $`rm -fr  ~/.docker`
 }
 
 async function useDocker(){
-	let prefix = `source ./output/exports.sh;`
-	await $([`${prefix}docker-compose build`])
-	await $([`${prefix}docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`])
-	await $([`${prefix}docker-compose push`])
-	await $([`${prefix}docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`])
+	await $`docker-compose build`
+	await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
+	await $`docker-compose push`
+	await $`export DOCKER_HOST='localhost:2377'; docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`
 }
 
 async function killTunnel(){
