@@ -19,7 +19,7 @@ let ssh = (ip, command, ...args) =>
 	retry(
 		{ count: 10, delay: 30000 }
 		, () =>
-			$`ssh root@${ip} -p 2222 -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
+			$`ssh root@${ip} -p $SSH_PORT -o "CheckHostIP no" -o "StrictHostKeychecking no" -o "UserKnownHostsFile=/dev/null" ${command};`
 		, ...args
 	)
 
@@ -50,7 +50,7 @@ async function ensureConnection(ip){
 	await $`touch ~/.ssh/known_hosts`
 	await $`ssh-keygen -R ${ip}`
 	await retry({ count: 5, delay: 30000 }
-		, () => $`ssh-keyscan -p 2222 -H ${ip} >> ~/.ssh/known_hosts`
+		, () => $`ssh-keyscan -p $SSH_PORT -H ${ip} >> ~/.ssh/known_hosts`
 	)
 }
 
@@ -59,7 +59,7 @@ async function setupDockerHostTunnel(ip, { timeout=5*60*1000 }={}){
 
 	// do not await, run in background
 	retry({ count: 5, delay: 20000 }, () => 
-		$`ssh -p 2222 -NL localhost:2377:/var/run/docker.sock root@${ip}`
+		$`ssh -p $SSH_PORT -NL localhost:2377:/var/run/docker.sock root@${ip}`
 	)
 	
 	// check the tunnel is running
@@ -82,7 +82,7 @@ async function joinSwarm(ips){
 			}
 		}) 
 	)
-	x= await Promise.all(x)
+	await Promise.all(x)
 }
 
 async function remoteDockerEnv(registryURL){
@@ -132,7 +132,7 @@ async function oncreate(){
 }
 
 async function onbeforeremove(){
-	let x;
+	let x
 	x= await $`terraform -chdir=ops output -json`
 	x= JSON.parse(x.stdout)
 	await $`ssh-keygen -R ${x.manager_ip.value}`

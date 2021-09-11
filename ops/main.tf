@@ -11,6 +11,7 @@ terraform {
   }
 }
 variable "DO_TOKEN" {}
+variable "SSH_PORT" {}
 
 # Configure the DigitalOcean Provider
 provider "digitalocean" {
@@ -33,11 +34,7 @@ locals {
   worker_count = 2
   manager_count = 1
 
-  droplet_ids = concat(
-    [ digitalocean_droplet.manager.id ]
-    ,
-    digitalocean_droplet.worker[*].id
-  )  
+  ssh_port = var.SSH_PORT
 }
 
 resource "random_integer" "manager_port" {
@@ -63,14 +60,13 @@ resource "digitalocean_droplet" "manager" {
   tags = ["swarm", "manager"]
   private_networking = true
 
-  count = local.manager_count
   user_data = trimspace(
     <<EOT
     #!/bin/bash
     set -e
 
 		cat <<- SSHCONFIG > /etc/ssh/sshd_config
-			Port ${random_integer.manager_port[count.index].result}
+			Port ${local.ssh_port}
 			PermitRootLogin yes
 			#StrictModes yes
 			#MaxAuthTries 6
@@ -80,15 +76,14 @@ resource "digitalocean_droplet" "manager" {
 			ChallengeResponseAuthentication no
 			UsePAM yes
 
-			X11Forwarding no
-      DebianBanner no
+			X11Forwarding yes
 			PrintMotd no
 
 			# override default of no subsystems
 			Subsystem       sftp    /usr/lib/openssh/sftp-server			
 		SSHCONFIG
 
-    ufw allow ${random_integer.manager_port[count.index].result}
+    ufw allow ${local.ssh_port}
 		systemctl restart sshd
 
     # local ip
@@ -124,7 +119,7 @@ resource "digitalocean_droplet" "worker" {
     set -e
 
     cat <<- SSHCONFIG > /etc/ssh/sshd_config
-			Port ${random_integer.worker_port[count.index].result}
+			Port ${local.ssh_port}
 			PermitRootLogin yes
 			#StrictModes yes
 			#MaxAuthTries 6
@@ -134,16 +129,17 @@ resource "digitalocean_droplet" "worker" {
 			ChallengeResponseAuthentication no
 			UsePAM yes
 
-			X11Forwarding no
-      DebianBanner no
+			X11Forwarding yes
 			PrintMotd no
 
 			# override default of no subsystems
 			Subsystem       sftp    /usr/lib/openssh/sftp-server			
 		SSHCONFIG
 
-    ufw allow ${random_integer.worker_port[count.index].result}
+    ufw allow ${local.ssh_port}
 		systemctl restart sshd
+
+    echo port ${random_integer.worker_port[count.index].result}
 
     ufw allow from 10.10.10.0/24 to any port 2377
     ufw allow from 10.10.10.0/24 to any port 7946
@@ -153,70 +149,6 @@ resource "digitalocean_droplet" "worker" {
     ufw allow 443
     EOT
   )
-}
-
-resource "digitalocean_firewall" "manager-firewall" {
-  name = "manager-${count.index}"
-
-  count = local.manager_count
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "80"
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "443"
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  outbound_rule {
-    protocol = "tcp"
-    port_range = "1-65535"
-    destination_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = random_integer.manager_port[count.index]
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  droplet_ids = [digitalocean_droplet.manager[count.index]]
-}
-
-resource "digitalocean_firewall" "worker-firewall" {
-  name = "worker-${count.index}"
-
-  count = local.worker_count
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "80"
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "443"
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  outbound_rule {
-    protocol = "tcp"
-    port_range = "1-65535"
-    destination_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = random_integer.worker_port[count.index]
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  droplet_ids = [digitalocean_droplet.worker[count.index]]
 }
 
 resource "digitalocean_loadbalancer" "lb" {
@@ -244,7 +176,11 @@ resource "digitalocean_loadbalancer" "lb" {
     digitalocean_vpc.vpc
   ]
 
-  droplet_ids = local.droplet_ids
+  droplet_ids = concat(
+    [ digitalocean_droplet.manager.id ]
+    ,
+    digitalocean_droplet.worker[*].id
+  )  
 }
 
 resource "digitalocean_container_registry" "registry" {
@@ -269,6 +205,45 @@ resource "digitalocean_project_resources" "resources" {
       [digitalocean_loadbalancer.lb.urn, digitalocean_droplet.manager.urn],
       digitalocean_droplet.worker[*].urn
     )
+}
+
+resource "digitalocean_firewall" "firewall" {
+  name = "only-22-80-and-443"
+
+  # depends_on = [
+  #   digitalocean_droplet.manager
+  #   , digitalocean_droplet.worker
+  # ]
+
+  droplet_ids = concat(
+    [ digitalocean_droplet.manager.id ]
+    ,
+    digitalocean_droplet.worker[*].id
+  )
+
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "22"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "${local.ssh_port}"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "443"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  outbound_rule {
+    protocol = "tcp"
+    port_range = "1-65535"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
 }
 
 output registry_url {
