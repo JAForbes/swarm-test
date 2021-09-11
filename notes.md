@@ -1,3 +1,15 @@
+I just configured the terraform but not the run script because I was thinking about this.  Randomizing every single port isn't any more secure than randomizing it once.
+
+Because the process is the same, you are just going to pick a single host, cycle through the ports until you get a hit.  If you get the port, you can continue trying to break in to that single host.  That host is part of a vpc with a subnet.  The nodes within that subnet can all talk to eachother.  So in effect, getting into one node is the same as getting into all nodes.  The assumptions is no-one gets into the VPC and that is a good assumption.  Not because it is impossible, but because if they get into the VPC its game over and efforted expended there is just a waste of time.
+
+So instead, I could just make the SSH port a var that is passed in.  Then the infra can still be open source, but the attack surface is still the full port range.
+
+And if I do that, then I already have that code working.  I just need to reference an env instead of a hardcoded 2222.
+
+I'll commit this tf change then revert the change in the next commit.  I'm going to commit it because I might change my mind about this.
+
+---
+
 End to end worked with 2222.  Just cleaning up a bit, I think I don't need `./output/exports.sh` anymore as the only variable needed is `DOCKER_HOST` and it is only used for the `stack` call.
 
 I was just thinking too, even if I have n managers.  The ideal way to deploy it is to have a single leader at infra time, and then add managers and workers to that leader's swarm.  So the logic is not too different.
