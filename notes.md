@@ -1,3 +1,21 @@
+Back to thinking about infra.  So a repo can push images, that is all well and good.
+
+But what about secrets, and what about infrastructure managed by that app, e.g. s3 buckets, databases.
+
+Does that stuff all continue to run there?
+
+Does it instead make sense for each app to assume the registry has the capacity it needs.  And it manages its own non swarm infra?
+
+And this repo simply manages swarm stuff?
+
+That feels right...
+
+Also I'm not sure about using docker for secrets.  Could I just store env in AWS KMS and pull down the file on start up.  A small perf penalty, but if its not serverless, would you feel it?
+
+Maybe I can just have a secrets folder on the cluster, and its mounted as an external volume in the target images.  You know what, that's probably what docker env is...
+
+---
+
 I got it to work.  It's 50% graceful, I follow the docs, but I do a --force on the final step, because otherwise it won't work until the node is destroyed
 
 Theoretically, we could run the provisioner after the destroy, but I'm not even sure how to model that in terraform, you'd have to model destruction itself as a resource which is something else...

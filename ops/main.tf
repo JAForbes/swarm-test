@@ -386,16 +386,24 @@ resource "digitalocean_loadbalancer" "lb" {
 		certificate_name = data.digitalocean_certificate.cert.name
 	}
 
+	healthcheck {
+		port     = local.ssh_port
+		protocol = "tcp"
+	}
+
 	// shouldn't be necessary, but I get errors
 	// if I don't include it
 	// "422: some of the specified target droplets don't belong to the same VPC as the Load Balancer"
 	depends_on = [
+		digitalocean_droplet.leader,
 		digitalocean_droplet.manager,
 		digitalocean_droplet.worker,
 		digitalocean_vpc.vpc
 	]
 
 	droplet_ids = concat(
+		digitalocean_droplet.leader[*].id
+		,
 		digitalocean_droplet.manager[*].id
 		,
 		digitalocean_droplet.worker[*].id
@@ -429,7 +437,7 @@ resource "digitalocean_project_resources" "resources" {
 }
 
 resource "digitalocean_firewall" "firewall" {
-	name = "only-22-80-and-443"
+	name = "${terraform.workspace}-swarm-test"
 
 	droplet_ids = concat(
 		digitalocean_droplet.manager[*].id
@@ -438,12 +446,6 @@ resource "digitalocean_firewall" "firewall" {
 		,
 		digitalocean_droplet.leader[*].id
 	)
-
-	inbound_rule {
-		protocol         = "tcp"
-		port_range       = "22"
-		source_addresses = ["0.0.0.0/0", "::/0"]
-	}
 
 	inbound_rule {
 		protocol         = "tcp"
