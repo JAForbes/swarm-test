@@ -1,3 +1,124 @@
+I got it to work.  It's 50% graceful, I follow the docs, but I do a --force on the final step, because otherwise it won't work until the node is destroyed
+
+Theoretically, we could run the provisioner after the destroy, but I'm not even sure how to model that in terraform, you'd have to model destruction itself as a resource which is something else...
+
+Next up, docker in terraform
+
+---
+
+Dropping from 5 -> 3 didn't break consensus.  This may be a non issue for me personally, as long as I never scale it down below 3.
+
+I could enforce that (sort of) by using `max(n,3)` in the definition of `manager_count`
+
+---
+
+> To cleanly re-join a manager node to a cluster:
+> 
+> To demote the node to a worker, run docker node demote <NODE>.
+> To remove the node from the swarm, run docker node rm <NODE>.
+> Re-join the node to the swarm with a fresh state using docker swarm join.
+
+That entire process can happen from the leader, or another manager.  I'll give that a go.
+
+---
+
+> If the last node leaves the swarm unexpectedly during the demote operation, the swarm becomes unavailable until you reboot the node or restart with --force-new-cluster.
+
+Thinking ... Maybe `--force` will always break consensus.
+
+---
+
+It seems consensus is extremely brittle.  If I remove nodes and maintain odd totals post apply I still get the error that the swarm has lost consensus.
+
+I'm going to try just alternating between 3, 5 and 7 but never go lower than 3.  If that is stable I'll move on, if not I'll need to look into how to destroy nodes gracefully.
+
+The thing is, if I am adding 2 nodes, they won't both join simultaneously, there will be a moment where there is 4 nodes before there is 5.  What happens then?
+
+Maybe it is because I am using `leave --force`.
+
+Maybe I need to log into another manager, drain it, then log into the node, call leave swarm, then back into the manager and call node rm.  What a pain.  I'll try simulating that manually before encoding it in terraform.
+
+I wonder if nomad has this rigidity.  Also it's possible because I am on an older ubuntu release.  I did that to fix another OpenSSL version mismatch thing that was breaking before.  But maybe thats not a problem now that I am planning on doing everything with terraform which uses the docker API directly instead of the compose CLI
+
+---
+
+Now I'm hitting this thing where I can't perform any `docker node` commands if there is an even number of nodes.  You can't add nodes, but seems you can remove nodes til you are back to 1 leader and then you can add nodes again.
+
+I wonder if there is a way to enforce in terraform that the manager count is an even number so that manager + leader is odd
+
+I thought, you could have a resource that checks the local value and just exits 0 in the provisioner but ...
+
+you could instead define the var as `manager_pairs = 1` which means how many pairs there are, which enforces it is even
+
+leader + even = raft consensus
+
+---
+
+Ok nodes leave the swarm on destroy.  And joining nodes doesn't make all nodes rejoin.  Pretty great.
+
+---
+
+I ended up having to use `docker leave swarm --force` otherwise I hit:
+
+> You are attempting to leave the swarm on a node that is participating as a manager. The only way to restore a swarm that has lost consensus is to reinitialize it with `--force-new-cluster`. Use `--force` to suppress this message.
+
+Also I had to some weird stuff to get destroy provisioners to work, here it is:
+
+```hcl
+resource "null_resource" "swarmMembership" {
+  # one of the worst aspects of tf
+  # can't access local.ssh_port in destroy provisioner
+  # without using triggers
+	triggers = {
+		ssh_port = local.ssh_port
+		ipv4_address = each.value.ipv4_address
+	}
+	
+  # ...
+
+	provisioner "remote-exec" {
+		when = destroy
+		connection {
+			type = "ssh"
+			user = "root"
+			host = self.triggers.ipv4_address
+			port = self.triggers.ssh_port
+			private_key = file(pathexpand("~/.ssh/id_rsa"))
+		}
+		
+		inline = [
+			"docker swarm leave --force"
+		]
+	}
+}
+```
+
+---
+
+Just doing some `state rm` surgery because I'm getting this `self.triggers is null` error.  Terraform is so great, but also so awful sometimes.
+
+---
+
+Just debugging cleanly destroying manager/worker nodes.  Surprisingly tricky because destroy provisioners can't reference variables or other resources.
+
+---
+
+Had an issue where managers weren't joining the swarm.  I think it was a firewall issue.  So I added some rules, seems to work now.
+
+---
+
+God I hate that heredoc requires tabs in bash
+
+---
+
+I just got a 504 from digitalocean and was served a cloudflare page.
+
+Scary...
+
+Also I got a timeout just now when cycling the infra, not sure if it was a refactor or DO just failing on me.  Going to try again in a few minutes just incase I'm hitting some kind of rate limit.
+
+---
+
 Its looking pretty neat now, but it'd be nice if I could generate these locals all in one loop:
 
 ```hcl
