@@ -1,3 +1,407 @@
+Its looking pretty neat now, but it'd be nice if I could generate these locals all in one loop:
+
+```hcl
+locals {
+  hashes = {
+    manager = [for x in local.config.manager[*]: sha256( jsonencode(x) ) ]
+    worker = [for x in local.config.worker[*]: sha256( jsonencode(x) ) ]
+    leader = [for x in local.config.leader[*]: sha256( jsonencode(x) ) ]
+  }
+  config = {
+    worker = [
+      for d in digitalocean_droplet.worker[*]: 
+        { 
+          user_data = d.user_data
+          size = d.size
+          ssh_keys = d.ssh_keys
+          region = d.region
+          image = d.image
+          name = d.name
+          type = "worker"
+        }
+    ]
+
+    leader = [
+      for d in digitalocean_droplet.leader[*]: 
+        { 
+          user_data = d.user_data
+          size = d.size
+          ssh_keys = d.ssh_keys
+          region = d.region
+          image = d.image
+          name = d.name
+          type = "leader"
+        }
+    ]
+
+    manager = [
+      for d in digitalocean_droplet.manager[*]: 
+        { 
+          user_data = d.user_data
+          size = d.size
+          ssh_keys = d.ssh_keys
+          region = d.region
+          image = d.image
+          name = d.name
+          type = "manager"
+        }
+    ]
+  }
+  complete = {
+    manager = [for i, d in digitalocean_droplet.manager[*]: merge(d, local.config.manager[i])]
+    worker = [for i, d in digitalocean_droplet.worker[*]: merge(d, local.config.worker[i])]
+    leader = [for i, d in digitalocean_droplet.leader[*]: merge(d, local.config.leader[i])]
+  }
+}
+```
+
+I'll spend a few minutes on that, and if it doesn't work, I'll move on to the docker part in terraform.  Re docker, I think I've settled on the idea I rely on the idea that the images I am referencing will already be on the registry and that this repo doesn't need to concern itself with that.  We can use count=0 for nodes where the apps aren't live yet.  Not ideal, but the benefit of having the infra public, and the apps publish their own image deltas is too significant.  it is nice to know it is totally possible to do this as a monorepo setup though with a single `apply` and no other scripts
+
+---
+
+It is all working, I factored out a lot of the inline loops to locals.
+
+This is pretty resilient.  The only issue I can see is if I recreate the leader.  Technicaly I guess the swarm will continue, and everything should work.
+But the leader will init a swarm that no-one joins, where instead the leader should join the existing swarm and take ownership.
+
+But that is pretty edge casey.  In the instance I need to recreate the leader, everything still works.  I can just `state rm`  and `import` an existing manager as the leader, then re-apply and terraform will just fix the tags and create a new manager to fill the gap.
+
+That's pretty good.  If there was some way to statically include the leadership identity in the config of the other nodes, that'd be good.  But, it's also kind of great it doesn't work because we don't want to, or need to, recreate the entire infra just because one node died, because docker swarm doesn't need that leader if it dies, it will carry on without it and just promote another idle manager.
+
+And seeing as we'll always have > 1 manager in production, its a non issue _I think_.
+
+---
+
+Now trying to combine worker + manager joining into a single resource:
+
+```hcl
+
+locals {
+  worker_config = [
+    for d in digitalocean_droplet.worker[*]: 
+      { 
+        user_data = d.user_data
+        size = d.size
+        ssh_keys = d.ssh_keys
+        region = d.region
+        image = d.image
+        name = d.name
+        type = "worker"
+      }
+  ]
+  manager_config = [
+    for d in digitalocean_droplet.manager[*]: 
+      { 
+        user_data = d.user_data
+        size = d.size
+        ssh_keys = d.ssh_keys
+        region = d.region
+        image = d.image
+        name = d.name
+        type = "manager"
+      }
+  ]
+}
+
+resource "null_resource" "swarmMembership" {
+
+  for_each = zipmap( 
+    concat(
+      [for x in local.manager_config[*]: sha256( jsonencode(x) ) ]
+      ,
+      [for x in local.worker_config[*]: sha256( jsonencode(x) ) ]
+    )
+    , concat(
+      [for i, d in digitalocean_droplet.manager[*]: merge(d, local.manager_config[i])]
+      , 
+      [for i, d in digitalocean_droplet.worker[*]: merge(d, local.worker_config[i])]
+    )
+  )
+
+  provisioner "remote-exec" {
+    connection {
+      type = "ssh"
+      user = "root"
+      host = each.value.ipv4_address
+      port = local.ssh_port
+      private_key = file(pathexpand("~/.ssh/id_rsa"))
+    }
+    
+    inline = [
+      "docker swarm join --token ${local.token[each.value.type]} ${local.leaderIP}:2377"
+    ]
+  }
+}
+```
+
+If this works, I'll clean it up after.  If it doesn't, I'll just have manager and worker member ship resources
+
+---
+
+One footgun to be aware of, if you generate a hash object, include something unique per record, like the name or something.  Otherwise you won't n provisioner for n resources.  I was a little confused why I only got 1 `managerSwarmMembership` for 3 managers.  But it was because they all had the same hash for the fields I picked out.
+
+---
+
+It works I love it
+
+```hcl
+resource "null_resource" "managerSwarmMembership" {
+
+  for_each = zipmap( 
+    [for d in digitalocean_droplet.manager[*]: 
+      sha256(
+        jsonencode({ 
+          # fields to react to
+          user_data = d.user_data
+          size = d.size
+          ssh_keys = d.ssh_keys
+          region = d.region
+          image = d.image
+          name = d.name
+        })
+      )
+    ]
+    , digitalocean_droplet.manager[*] 
+  )
+
+  provisioner "remote-exec" {
+    connection {
+      type = "ssh"
+      user = "root"
+      host = each.value.ipv4_address
+      port = local.ssh_port
+      private_key = file(pathexpand("~/.ssh/id_rsa"))
+    }
+    
+    inline = [
+      "docker swarm join --token ${local.managerToken} ${local.leaderIP}:2377"
+    ]
+  }
+}
+```
+
+---
+
+But I don't know, I'll likely change user_data from time to time, or the size of the droplet.  Most other fields will update in place.
+
+Let's try and do it right...
+
+---
+
+Maybe the key should be a hash of the resource.  I wonder if you can do that...
+
+So you can, but you can encode only static fields.  And if you reference fields that are `known after apply` then you can't use them in the `for_each`.
+
+You could manually build an object of specific keys to react to, but its almost better to be completly naive than partially naive where one may get a false sense of security.
+
+If we use the resource name, an object that is force re-created, it won't be observed by these provisioners.  But if the count changes it will.
+
+You could hack this, and reference an external resource that just sniffs terraform show but that feels like crossing a threshold from usefulness into madness.
+
+---
+
+Here is my latest incantation:
+
+```hcl
+for_each = zipmap( [for i in range(local.manager_count): "${i}" ], range(local.manager_count) )
+```
+
+Testing it now.
+
+Just thinking, it might be better for the key to be like `[digitalocean_droplet.manager[*].name]`.
+
+In this case it is fine, but for concatenating lists e.g. workers+leader+manager for waiting for cloud-init, the offset shouldn't be the key, the name should be or you might run the command against the wrong server.
+
+E.g.
+
+If I remove a worker and the list was `concat(workers[*], managers[*], leader[*])`
+
+And there was 5 workers, `worker[4]` now points to `manager[0]`
+
+But that's an easy change I think.
+
+The incantation worked though, test just finished.  I feel like this is dark arts now.
+
+---
+
+It didn't work, seems you need to use for_each to only run on new nodes.  But the trick is for_each can't reference e.g. the ip address or the id of the droplet because that isn't known at plan time.
+
+So now I'm trying what feels like a very dirty hack:
+
+```hcl
+for_each = toset( split(",",join(",",range(local.manager_count))) )
+```
+
+This creates a set of the indices {"0","1","2","3","4"}
+
+Effectively if I change the count, it uses the index to determine the identity of the bull resource block, so it will skip
+0-3 if I changed the count to 4, and if I change it to 3, it will run the destroy provisioner on 4 but not 0-3.
+
+Why split/join.  Well I need the set to contain strings not integers and I don't know if you can just map over a list in hcl.
+
+...
+
+Seems there are for loops 
+
+`[for x in var.a : x * 2]` 
+
+I might try that instead, its more direct.
+
+---
+
+This is super interesting:
+
+```hcl
+resource "null_resource" "managerSwarmMembership" {
+  count = local.manager_count
+
+  triggers = {
+    id = digitalocean_droplet.manager[count.index].id
+  }
+
+  provisioner "remote-exec" {
+    connection {
+      type = "ssh"
+      user = "root"
+      host = digitalocean_droplet.manager[count.index].ipv4_address
+      port = local.ssh_port
+      private_key = file(pathexpand("~/.ssh/id_rsa"))
+    }
+
+    inline = [
+      "docker swarm join --token ${local.managerToken} ${local.leaderIP}:2377"
+    ]
+  }
+}
+```
+
+We model a manager joining the swarm as a resource.  It uses `count` so for each manager we register to the swarm `count` times referencing the ip via `[count.index].ipv4_address`
+
+The `triggers` section handles updates, so if we add a new manager by changing count, it won't run swarm for an id it has already seen.  That is the theory at least, I'm still testing.
+
+---
+
+
+Also I just want to highlight that this works and I can't believe it:
+
+```hcl
+resource "null_resource" "cloud-init-complete" {
+  count = local.manager_count + local.worker_count + 1
+
+  provisioner "remote-exec" {
+    connection {
+
+      host = concat(
+        digitalocean_droplet.manager[*].ipv4_address,
+        digitalocean_droplet.worker[*].ipv4_address,
+        [digitalocean_droplet.leader.ipv4_address]
+      )[count.index]
+
+    }
+  }
+}
+```
+
+---
+
+Just had a realization.  Instead of generating json in external resource.  Generate the json in cloud-init and then simply access it in the external resource.
+
+This is so much better because there's no external template files, there's no issues with escaping quotes.  You don't need jq or anything like that.
+
+And you can debug it easily, If your deploy fails, ssh in and check, just check if the generated json file is on the system.  If you want to see what happened, read `/var/log/cloud-init-output.log`.
+
+---
+
+Instead of having conditionals between a manager initializing the swarm or a manager joining the swarm.  I'm going to have a separate manager resource called `leader` and then I can just init there.
+
+I'll make the config super verbose while I hash this all out and then I'll refactor.  I may not need the `run.js` script anymore if this works.
+
+---
+
+Assuming it does work.  I still have the problem with obtaining the latest images if I am not building them in this repo.  So I'll go read up on that.
+
+
+Aha!
+
+> To be able to update an image dynamically when the sha256 sum changes, you need to use it in combination with docker_registry_image as follows:
+
+https://registry.terraform.io/providers/kreuzwerker/docker/latest/docs/resources/image
+
+https://registry.terraform.io/providers/kreuzwerker/docker/latest/docs/resources/registry_image
+
+So I just create a registry image resource that depends on the cloud_init null resource, so I only run this stuff when the infra is up.
+
+If there is no image there, the deploy, fails, but that makes sense.
+
+So then it is just a matter of the other repos publishing their images which is easy, I could even create the registry outside of this terraform config because it is a share resource and then just hard code the registry auth into the env of each repo.
+
+---
+
+Turns out remote-exec is pretty resilient!  I never used, I thought it would be garbage.  
+
+I just got some ls' to work on a dynamically created set of managers, trying cloud-init wait now
+
+This may work!
+
+---
+
+Once again reading https://registry.terraform.io/providers/kreuzwerker/docker
+
+Seems like it can manage the rollout of services pretty well.  But I've still got the problem that I need to initiate the swarm before I can use any of these resources.
+
+Ok, once more, I will try to get `cloud-init` wait to work as a provisioner.  Maybe I'll try a null resource instead.
+
+---
+
+I went back to the idea of doing more things in terraform.  Like e.g. adding a provisioner for `cloud-init status --wait`.  But it is so hard to debug why a command is taking forever.  And with ssh connection issues it is even more difficult.
+
+I'm thinking now, of not having the source in this repo at all.  And using the private registry.  Each repo pushes their latest image to the registry and this repo simply references the version tag.
+
+That is more efficient because the repo pushing will only push layers the registry already doesn't have.  And equally the swarm will only pull layers it doesn't already have.  So deploys should be quicker.
+
+Given that, all this repo really needs to worry about is new nodes joining the swarm.  So if the oncreate was able to detect if a worker is in the swarm yet, and only add it once it is, then that's enough for this layer.
+
+I don't like the idea of having different layers, e.g. this is the infra repo, you deploy this first, then you go to an app repo and deploy there.  It feels like peer dependencies, which I've always hated.
+
+But what I've just described is the most common pattern.  Repos push images, and infra is managed elsewhere.  So I guess it is fine.
+
+So terraform runs, then a script checks if any of the nodes are not in the swarm, and if they aren't it adds them.
+
+When you want to update an app, you edit the release tag in the docker-compose.  Which isn't great.  We could have an env var for each image version which is updated automatically, but that also feels clumsy because its not in source.
+
+We could update the yaml automatically using js-yaml or something.
+
+Maybe there is a step that goes and fetches the latest tag from all the given repos and then updates the corresponding image reference to use that version.
+
+But that requires access to the repo not just the registry.
+
+Maybe, we can poll the registry?
+
+---
+
+Just thinking about lifecycle on the manager/worker.
+
+So when the first manager is created, I want to init the swarm, and get the join tokens.  But I want to create all the infra at once.  So how do I only run specific provisioning steps where appropriate?
+
+I'm thinking the provisioners could simply write to an append only log file saying what happened
+then after wards the run script can look at that log and decide what to do
+
+e.g. `leader-rotated` would require creating a new swarm, and making all the nodes join that swarm, `manager-created` would require getting the manager join token from the leader, `worker-created` is much the same.
+
+`app-updated` would trigger docker build/push and a stack deploy, we'd have a single stack deploy for all app updates/creates
+
+I can see this working really well without much overhead.
+
+Effectively infra is parallel, and provisioning is managed and hopefully parallel but we're just responding to "events" stored in a text file post apply.
+
+I'm thinking we'd append single line json records in the provisioner
+
+```
+echo '{ event: "app-destroyed", ... }' >> events.jsonstream
+```
+
+---
+
 Now I'm trying to refactor run a bit to clean up after itself via `use` functions.  After that I'll look at:
 
 > So maybe I have an app resource in terraform, it hashes the app source, and if it changes it makes an image, pushes it to the registry.
@@ -443,6 +847,7 @@ I wondered if I could get the auth from terraform, you can!  And the example sho
 But ultimately I found the docker provider super confusing because it maps to the docker API not the docker-compose format.  It was hard to get basic things working like defining an `image` property on the service to auto push to the private registry on build and deploy.  It kept saying the property was unexpected.
 
 So now I'm thinking, I'll use this container registry thing, but only to store the auth as an output and then go back to manual scripting after the infra is up.
+
 ---
 
 Ok before I proceed I am going to try to automate what I had to do so far.

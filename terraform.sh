@@ -9,12 +9,17 @@ function plan(){
     terraform -chdir=ops plan $@
 }
 function apply(){
-    terraform -chdir=ops apply $@ \
-    && ./run.js oncreate
+    # touch ./output/events.jsonstream
+    # rm ./output/events.jsonstream 
+    terraform -chdir=ops apply $@
+    # ./run.js react
+    
 }
 function destroy(){
-    ./run.js onbeforeremove
+    # touch ./output/events.jsonstream
+    # rm ./output/events.jsonstream
     terraform -chdir=ops destroy $@
+    # ./run.js react
 }
 function state(){
     terraform -chdir=ops state $@

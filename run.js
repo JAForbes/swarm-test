@@ -59,9 +59,9 @@ async function useConnection({ ip }, f) {
 	}
 }
 
-async function joinSwarm(ips){
+async function joinSwarm(type, ips){
 	let x = ips
-	let cmd = await getJoinTokenCommand()
+	let cmd = await getJoinTokenCommand(type)
 	
 	x= x.map( 
 		x => ssh(x, cmd, x => {
@@ -109,33 +109,87 @@ async function oncreate(){
 
 		await useTunnel({ ip }, async () => {
 			await joinSwarm(x.worker_ips.value)
-	
-			await $`rm -fr  ~/.docker`
-			await $`docker-compose build`
-			await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
-			await $`docker-compose push`
-			await $`export DOCKER_HOST='localhost:2377'; docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`
 		})
 	})
 }
 
 async function onbeforeremove(){
-	let x
-	x= await $`terraform -chdir=ops output -json`
-	x= JSON.parse(x.stdout)
-	await $`ssh-keygen -R ${x.manager_ip.value}`
+	// let x
+	// x= await $`terraform -chdir=ops output -json`
+	// x= JSON.parse(x.stdout)
+	// await $`ssh-keygen -R ${x.manager_ip.value}`
 }
 
-async function getJoinTokenCommand(){
+async function getJoinTokenCommand(type){
 	let x 
 	
 	x = await $`doctl compute droplet list --tag-name swarm --tag-name manager --format PublicIPv4,PrivateIPv4 --no-header`
 	let [publicIP, privateIP] = x.stdout.trim().split(/\s+/)
 
-	x = await ssh(publicIP, "docker swarm join-token worker -q")
+	x = await ssh(publicIP, `docker swarm join-token ${type} -q`)
 	x = x.stdout.trim()
 	
  	return `docker swarm join --token ${x} ${privateIP}:2377`
+}
+
+async function dockerStuff(){
+	await $`rm -fr  ~/.docker`
+	await $`docker-compose build`
+	await $`docker login -u $DO_TOKEN -p $DO_TOKEN registry.digitalocean.com`
+	await $`docker-compose push`
+	await $`export DOCKER_HOST='localhost:2377'; docker stack deploy --compose-file docker-compose.yml swarm_test --with-registry-auth`
+}
+
+async function react(){
+	let xs = await fs.readFile('./output/events.jsonstream', 'utf8')
+	xs= xs.toString()
+	xs= xs.trim()
+	xs= xs.split('\n') 
+	xs= xs.map( JSON.parse )
+	
+	let idx = {}
+	for(let event of xs){
+		idx[event.eventName] = 
+		idx[event.eventName] || []
+
+		idx[event.eventName].push(event)
+		console.log(event)
+	}
+
+	let output = await $`terraform -chdir=ops output -json`
+	output = JSON.parse(output)
+
+	// if( idx['leader-created'] ) {
+	// 	await oncreate()
+	// 	return null
+	// }
+
+	// if (idx['worker-created']) {
+	// 	let ips = []
+		
+	// 	for(let event of idx['worker-created']){
+	// 		ips.push(output.worker_ips[event.count])
+	// 	}
+
+	// 	await joinSwarm('worker', ips)
+	// }
+
+	// if(idx['manager-created']) {
+
+	// }
+
+	console.log(idx)
+	console.log(output)
+}
+
+async function event(data, eventName){
+	let x
+	x = { ...data }
+	delete x._
+	x= { eventName, ...x }
+	x= JSON.stringify(x)
+	x = `${x}\n`
+	fs.appendFileSync('./output/events.jsonstream', x)
 }
 
 let subcommand = argv._.shift()
@@ -144,13 +198,15 @@ let commands = {
 	'get-join-token-command': getJoinTokenCommand
 	, oncreate
 	, onbeforeremove
+	, event
+	, react
 }
 
 if(!subcommand || !(subcommand in commands)) {
 	console.error(Object.keys(commands).join('\n'))
 	process.exitCode = 1
 } else if( subcommand && commands[subcommand] ) {
-	commands[subcommand](argv, argv._)
+	commands[subcommand](argv, ...argv._)
 	.then( () => process.exit(0), async err => {
 		await $`mkdir -p ./output`
 		await fs.writeFile('./output/error.json', JSON.stringify({ message: err.message, stack: err.stack }))
