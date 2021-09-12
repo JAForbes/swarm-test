@@ -31,8 +31,7 @@ data "digitalocean_certificate" "cert" {
 locals {
 	garak = 31154024
 	bodhi = 31212382
-	worker_count = 0
-	# must always be an even number or swarm will 😭
+	worker_count = 2
 	manager_pairs = 2
 	
 	# do not edit, read only
@@ -423,6 +422,7 @@ resource "digitalocean_project_resources" "resources" {
 		project = digitalocean_project.project.id
 		resources = concat(
 			[digitalocean_loadbalancer.lb.urn],
+			digitalocean_droplet.leader[*].urn,
 			digitalocean_droplet.manager[*].urn,
 			digitalocean_droplet.worker[*].urn
 		)
