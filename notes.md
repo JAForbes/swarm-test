@@ -1,3 +1,88 @@
+Ok so new idea.
+
+Storing the secrets in tf state is not a good solution because the next time you run apply, if the secrets aren't there on the fs terraform would remove the secret.
+
+So instead:
+
+Repo admins can push an env file up to s3, versioned, with kms, to a prefix for their services.
+
+App Repo CI can pull down that env file for their prefix and inject it into the swarm via terraform (kreuzwerker/docker).
+
+Technically the secrets will sit in tf state (if that's how kreuzwerker docker secret works, not sure), but the central storage mechanism is S3.
+
+Which means access can be logged, previous values can be restored.  And access can be managed via policies.
+
+Devs aren't directly touching secrets unless they have access.  And suspicious access of secrets is at least auditable.
+
+The fact deployment using docker secrets is sort of an implementation detail, which is preferable to me as I may not stick with docker swarm long term.  I imagine we'll try Nomad out in a year or two, but I doubt S3 is going anywhere.
+
+Theoretically, the current terraform IAM access in Odin would allow Odin to override the IAM role and get around this protection.  But, that is why CI is the only one with that IAM access.  And the terraform config is guarded by pull requests / deployment approval.
+
+I think protected branches are key here.  So I jump back onto `pr-release` so it can be used here and elsewhere against protected branches.
+
+---
+
+So proposed workflow now is:
+
+You don't give the app repo's CI manager access.  Instead the app repo just has registry access.
+
+The app repo deploys an image to the registry.
+
+Then in the swarm repo, you update the tag for the service image and add any secrets to the terraform config.
+
+The raw secrets are stored in the repo env (I guess).
+
+No I hate this, so awkward.  Next....
+
+---
+
+Maybe our primary secret storage is in swarm's terraform state.  Which is eventually either stored on S3 with KMS security, or with hashicorps remote state.
+
+Then this repo deploys the secrets to the swarm.  Then it is just up to the app repos to reference secrets by name that do exist on the swarm.
+
+Eventually, a CLI could be made to wrap around this workflow.  So admins can view secrets (something docker won't let you do).
+
+From time to time you need to access secrets and docker swarm secrets do not support that...
+
+But technically they do because you could just attach to a running container in the swarm and echo out the secrets file.  So its kind of a big joke to not let the manager view the secret value.  An attacker could easily figure that out if they had manager access, so why pretend otherwise?
+
+---
+
+Let's think through giving app repos access.
+
+So each repo stores their env in Github secrets?
+
+Github actions generates an env file.
+
+The env file is updated as a new secret (if it changed) and pushed to the swarm
+
+An update is triggered for the running services, and the secrets propagate.
+
+Ehhh I really hate storing each and every secret within terraform, and github, and my local env file.  It is a pain.  Every time I add a secret I need to update code in 3 places....
+
+---
+
+
+I think for Odin I will just have the secret be the .env file for now, instead of having a separate secret for each key in the env file.
+
+The reason is, the app already is set up that way.  It uses `dotenv` and falls back to environment variables.
+
+I think though, for secrets to work, you need to be able to access the swarm directly to push the secrets up with the service.
+
+I was imagining the app repos would push their images, but be swarm unaware.  They'd simply manage non swarm infra, and pushing up their own images.
+
+But... it seems like to use docker secrets, you need to have access to the swarm.
+
+I could have an intermediary.  But that just seems less secure and more complicated.
+
+Maybe, eventually, at scale, each repo has a user on the leader that is non root.  This user would not have access to swarm commands, but they could invoke some scripts which can access specific docker commands, maybe via a sudoer exception.
+
+But even then, the swarm repo would need to know to deploy the new image.
+
+Maybe it is just simpler to give the pipeline on each app repo swarm access.  Feels scary though.  Especially as protected branches conflict with my release management process on github which means I tend to disable protected branches.
+
+---
+
 Back to thinking about infra.  So a repo can push images, that is all well and good.
 
 But what about secrets, and what about infrastructure managed by that app, e.g. s3 buckets, databases.
